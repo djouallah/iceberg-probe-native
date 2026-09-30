@@ -1,0 +1,2 @@
+-r catalog.txt
+duckdb>=2.0.0.dev0

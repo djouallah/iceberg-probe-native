@@ -1,0 +1,564 @@
+"""What the OneLake Iceberg REST catalog lets chDB (ClickHouse in-process) do.
+
+chDB's Iceberg support is ClickHouse's own C++ implementation, so like DuckDB and Sail it is an
+independent witness: a `no` it shares with the others is very likely the catalog's.
+
+THE SESSION IS lakehouse_benchmark's (bench.engines.chdb_iceberg): a `DataLakeCatalog` database of
+catalog_type 'onelake', with the engine's own bearer token signing both the catalog and storage.
+Writes are ClickHouse's experimental Iceberg writer, behind allow_experimental_insert_into_iceberg.
+
+WHERE CLICKHOUSE HAS NO STATEMENT for an operation, the probe sends the Spark form anyway, so the
+`no` carries ClickHouse's own parser message and the log says whose limit it is.
+
+IF chDB CANNOT CREATE A TABLE, the write, schema and maintenance probes still run, on a table
+pyiceberg creates; their detail says so.
+
+EVERY PROBE CHECKS ITS EFFECT through pyiceberg, which reads what the CATALOG now says rather than
+what chDB cached. Accepted with no effect is a no-op, not a yes.
+
+This is a private preview under active development, so everything here is a reading taken on a
+date rather than a property of the product.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from datetime import UTC, datetime
+
+from catalog_capability import (
+    BROKEN,
+    NAMESPACE,
+    NOOP,
+    REFUSED,
+    SKIPPED,
+    SUPPORTED,
+    NoOp,
+    Refused,
+    Report,
+    Skip,
+    iceberg_schema,
+)
+
+from bench import auth, scrub
+from bench.config import Config
+from bench.engines.chdb_iceberg import DB, ChdbIceberg
+
+SEED = [(1, 10), (2, 20), (3, 30)]
+
+
+def _one_line(text: object, limit: int = 700) -> str:
+    flat = " ".join(scrub.scrub(text).split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _say(text: object) -> None:
+    print(scrub.scrub(text), flush=True)
+
+
+def _values(pairs) -> str:
+    return ", ".join(f"({i}, {v})" for i, v in pairs)
+
+
+def _select(pairs) -> str:
+    """A SELECT yielding Int64 (id, v) rows, so no insert depends on implicit casts."""
+    return f"SELECT * FROM values('id Int64, v Int64', {_values(pairs)})"
+
+
+class ChdbCapability:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.engine = ChdbIceberg(cfg)
+        self.report = Report(reason=lambda exc: _one_line(scrub.scrub_exc(exc, 2000), 600))
+        self.run = "{}_{}".format(
+            os.environ.get("GITHUB_RUN_ID", "local"),
+            os.environ.get("GITHUB_RUN_ATTEMPT", "1"),
+        )
+        self.keep = os.environ.get("CAPABILITY_KEEP") == "1"
+        self.ns = NAMESPACE
+        self.version = "no session"
+        self.can_create = False
+        self.created: list[str] = []
+        self.by_pyiceberg: set[str] = set()
+        self._catalog = None
+
+    # -- helpers -----------------------------------------------------------------------------
+
+    def sql(self, statement: str) -> list[tuple]:
+        """One statement. chDB's own `no` becomes `Refused`, carrying its message."""
+        _say(f"       > {_one_line(statement, 300)}")
+        try:
+            return self.engine.query(statement)
+        except Exception as exc:  # noqa: BLE001 - every chDB error is an answer
+            raise Refused(_one_line(f"{type(exc).__name__}: {exc}")) from None
+
+    def name(self, what: str) -> str:
+        return f"ch_{self.run}_{what}"
+
+    def t(self, table: str) -> str:
+        """The catalog's `ns.table` is one table name inside the attached database."""
+        return f"{DB}.`{self.ns}.{table}`"
+
+    def pyiceberg(self):
+        if self._catalog is None:
+            self._catalog = auth.catalog(self.cfg)
+        return self._catalog
+
+    def iceberg(self, table: str):
+        return self.pyiceberg().load_table((self.ns, table))
+
+    def _snapshots(self, table: str) -> list:
+        return sorted(
+            self.iceberg(table).metadata.snapshots,
+            key=lambda s: (s.sequence_number or 0, s.timestamp_ms),
+        )
+
+    def _py_rows(self, table: str, cols=("id", "v")):
+        try:
+            arrow = self.iceberg(table).scan(selected_fields=cols).to_arrow()
+            return sorted(tuple(row[c] for c in cols) for row in arrow.to_pylist())
+        except Exception as exc:  # noqa: BLE001 - a cross-check must not decide the answer
+            return f"pyiceberg could not read it: {_one_line(scrub.scrub_exc(exc, 300), 300)}"
+
+    def _ch_rows(self, table: str, cols: str = "id, v"):
+        try:
+            return self.engine.query(f"SELECT {cols} FROM {self.t(table)} ORDER BY id")
+        except Exception as exc:  # noqa: BLE001 - a read-back must not decide the answer
+            return f"chDB could not read it back: {_one_line(exc, 300)}"
+
+    def _expect(self, table: str, expected: list[tuple], what: str, cols=("id", "v")) -> str:
+        """pyiceberg decides, because it reads the catalog; chDB's own read is reported beside."""
+        py = self._py_rows(table, cols)
+        ch = self._ch_rows(table, ", ".join(cols))
+        made = "; table made by pyiceberg" if table in self.by_pyiceberg else ""
+        if py != expected:
+            raise NoOp(
+                f"{what} returned success; expected {expected}, pyiceberg reads {py}, "
+                f"chDB reads {ch}{made}"
+            )
+        agree = "chDB agrees" if ch == py else f"chDB reads {ch}"
+        return f"{what}: pyiceberg reads {py}; {agree}{made}"
+
+    def _create(self, what: str, columns: str = "id Int64, v Int64", tail: str = "") -> str:
+        table = self.name(what)
+        self.sql(f"CREATE TABLE {self.t(table)} ({columns}) {tail}".rstrip())
+        self.created.append(table)
+        return table
+
+    def _py_create(self, what: str, partitioned: bool = False) -> str:
+        """The same table made by pyiceberg, for when chDB cannot create one itself."""
+        table = self.name(what)
+        schema, spec = iceberg_schema(), None
+        if partitioned:
+            from pyiceberg.partitioning import PartitionField, PartitionSpec
+            from pyiceberg.schema import Schema
+            from pyiceberg.transforms import IdentityTransform
+            from pyiceberg.types import NestedField, StringType
+
+            schema = Schema(*schema.fields, NestedField(3, "p", StringType(), required=False))
+            spec = PartitionSpec(PartitionField(3, 1000, IdentityTransform(), "p"))
+        kwargs = {"partition_spec": spec} if spec else {}
+        self.pyiceberg().create_table((self.ns, table), schema, **kwargs)
+        self.created.append(table)
+        self.by_pyiceberg.add(table)
+        return table
+
+    def _empty(self, what: str) -> str:
+        """An empty (id, v) table: chDB's if it can create one, otherwise pyiceberg's."""
+        return self._create(what) if self.can_create else self._py_create(what)
+
+    def _fresh(self, what: str) -> str:
+        """A table holding SEED, written by chDB."""
+        table = self._empty(what)
+        try:
+            self.sql(f"INSERT INTO {self.t(table)} VALUES {_values(SEED)}")
+        except Refused as exc:
+            raise Skip(f"could not seed the table: {exc}") from None
+        return table
+
+    def _partitioned(self, what: str) -> str:
+        if self.can_create:
+            table = self._create(what, "id Int64, v Int64, p String", "PARTITION BY p")
+        else:
+            table = self._py_create(what, partitioned=True)
+        try:
+            self.sql(f"INSERT INTO {self.t(table)} VALUES (1, 10, 'a'), (2, 20, 'a'), (3, 30, 'b')")
+        except Refused as exc:
+            raise Skip(f"could not seed the table: {exc}") from None
+        return table
+
+    # -- session -----------------------------------------------------------------------------
+
+    def session(self) -> str:
+        self.engine.setup()
+        self.version = self.engine.version
+        listed = self.sql(
+            f"SELECT count() FROM system.tables WHERE database = '{DB}' "
+            f"SETTINGS show_data_lake_catalogs_in_system_tables = 1"
+        )
+        return f"chdb {self.version}; {listed[0][0]} catalog table(s) listed"
+
+    # -- create ------------------------------------------------------------------------------
+
+    def create_table(self) -> str:
+        table = self._create("base")
+        self.can_create = True
+        tbl = self.iceberg(table)
+        fields = [(f.field_id, f.name, str(f.field_type)) for f in tbl.schema().fields]
+        return f"fields {fields}, format-version {tbl.metadata.format_version}"
+
+    def ctas(self) -> str:
+        table = self.name("ctas")
+        self.created.append(table)
+        self.sql(f"CREATE TABLE {self.t(table)} AS {_select(SEED)}")
+        return self._expect(table, SEED, "CTAS")
+
+    def partitioned(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._partitioned("part")
+        spec = [str(f.transform) for f in self.iceberg(table).spec().fields]
+        if not spec:
+            raise NoOp("PARTITION BY returned success and the spec is empty")
+        files = len(list(self.iceberg(table).scan().plan_files()))
+        return f"spec {spec}; 3 rows over 2 partitions wrote {files} data file(s)"
+
+    def sorted_at_create(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._create("sorted", tail="ORDER BY id")
+        order = self.iceberg(table).sort_order()
+        if not order.fields:
+            raise NoOp("ORDER BY returned success and the table has no sort order")
+        return f"sort order {order}"
+
+    # -- write -------------------------------------------------------------------------------
+
+    def insert_into(self) -> str:
+        table = self._empty("insert")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES {_values(SEED)}")
+        return self._expect(table, SEED, "INSERT INTO") + (
+            f"; {len(self._snapshots(table))} commit(s)"
+        )
+
+    def insert_select(self) -> str:
+        table = self._fresh("insertsel")
+        self.sql(f"INSERT INTO {self.t(table)} {_select([(4, 40)])}")
+        return self._expect(table, SEED + [(4, 40)], "INSERT ... SELECT")
+
+    def insert_overwrite(self) -> str:
+        table = self._fresh("overwrite")
+        self.sql(f"INSERT OVERWRITE {self.t(table)} {_select([(1, 100), (2, 200)])}")
+        return self._expect(table, [(1, 100), (2, 200)], "INSERT OVERWRITE")
+
+    def overwrite_partition(self) -> str:
+        table = self._partitioned("ovwpart")
+        self.sql(f"INSERT OVERWRITE {self.t(table)} PARTITION (p = 'a') VALUES (9, 90)")
+        return self._expect(
+            table, [(3, 30, "b"), (9, 90, "a")], "partition a replaced", ("id", "v", "p")
+        )
+
+    def delete_from(self) -> str:
+        table = self._fresh("delete")
+        self.sql(f"DELETE FROM {self.t(table)} WHERE id = 1")
+        return self._expect(table, SEED[1:], "DELETE FROM")
+
+    def alter_delete(self) -> str:
+        table = self._fresh("altdelete")
+        self.sql(f"ALTER TABLE {self.t(table)} DELETE WHERE id = 1")
+        return self._expect(table, SEED[1:], "ALTER TABLE ... DELETE")
+
+    def update(self) -> str:
+        table = self._fresh("update")
+        self.sql(f"UPDATE {self.t(table)} SET v = 999 WHERE id = 1")
+        return self._expect(table, [(1, 999), (2, 20), (3, 30)], "UPDATE")
+
+    def alter_update(self) -> str:
+        table = self._fresh("altupdate")
+        self.sql(f"ALTER TABLE {self.t(table)} UPDATE v = 999 WHERE id = 1")
+        return self._expect(table, [(1, 999), (2, 20), (3, 30)], "ALTER TABLE ... UPDATE")
+
+    def merge_into(self) -> str:
+        table = self._fresh("merge")
+        self.sql(
+            f"MERGE INTO {self.t(table)} t USING ({_select([(1, 777), (9, 90)])}) s "
+            f"ON t.id = s.id WHEN MATCHED THEN UPDATE SET v = s.v "
+            f"WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)"
+        )
+        return self._expect(table, [(1, 777), (2, 20), (3, 30), (9, 90)], "MERGE INTO")
+
+    def truncate(self) -> str:
+        table = self._fresh("truncate")
+        self.sql(f"TRUNCATE TABLE {self.t(table)}")
+        return self._expect(table, [], "TRUNCATE")
+
+    # -- schema ------------------------------------------------------------------------------
+
+    def add_column(self) -> str:
+        table = self._fresh("addcol")
+        self.sql(f"ALTER TABLE {self.t(table)} ADD COLUMN w Nullable(Int64)")
+        names = [f.name for f in self.iceberg(table).schema().fields]
+        if "w" not in names:
+            raise NoOp(f"returned success and the schema is {names}")
+        return f"schema {names}"
+
+    def drop_column(self) -> str:
+        table = self._fresh("dropcol")
+        self.sql(f"ALTER TABLE {self.t(table)} DROP COLUMN v")
+        names = [f.name for f in self.iceberg(table).schema().fields]
+        if "v" in names:
+            raise NoOp(f"returned success and the schema is still {names}")
+        return f"schema now {names}"
+
+    def rename_column(self) -> str:
+        table = self._fresh("renamecol")
+        self.sql(f"ALTER TABLE {self.t(table)} RENAME COLUMN v TO v2")
+        names = [f.name for f in self.iceberg(table).schema().fields]
+        if "v2" not in names:
+            raise NoOp(f"returned success and the schema is still {names}")
+        return self._expect(table, SEED, "renamed, data kept", ("id", "v2"))
+
+    def partition_evolution(self) -> str:
+        table = self._fresh("specevo")
+        self.sql(f"ALTER TABLE {self.t(table)} ADD PARTITION FIELD bucket(4, id)")
+        spec = [str(f.transform) for f in self.iceberg(table).spec().fields]
+        if not spec:
+            raise NoOp("returned success and the table is still unpartitioned")
+        return f"spec now {spec}"
+
+    def set_property(self) -> str:
+        table = self._fresh("props")
+        self.sql(f"ALTER TABLE {self.t(table)} SET TBLPROPERTIES ('probed-at' = '{self.run}')")
+        if self.iceberg(table).properties.get("probed-at") != self.run:
+            raise NoOp("returned success and the property is not on the table")
+        return "the property is on the table"
+
+    def sort_order_evolution(self) -> str:
+        table = self._fresh("sortevo")
+        self.sql(f"ALTER TABLE {self.t(table)} MODIFY ORDER BY id")
+        order = self.iceberg(table).sort_order()
+        if not order.fields:
+            raise NoOp("MODIFY ORDER BY returned success and the table has no sort order")
+        return f"sort order now {order}"
+
+    # -- read --------------------------------------------------------------------------------
+
+    def time_travel(self) -> str:
+        table = self._fresh("travel")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (4, 40)")
+        first = self._snapshots(table)[0].snapshot_id
+        rows_then = self.sql(
+            f"SELECT count() FROM {self.t(table)} SETTINGS iceberg_snapshot_id = {first}"
+        )
+        if rows_then[0][0] != 3:
+            raise NoOp(f"iceberg_snapshot_id of the first snapshot reads {rows_then[0][0]} rows")
+        return "SETTINGS iceberg_snapshot_id of the first snapshot reads 3 rows (the table has 4)"
+
+    def metadata_tables(self) -> str:
+        table = self._fresh("inspect")
+        found = self.sql(
+            f"SELECT count() FROM system.iceberg_history "
+            f"WHERE database = '{DB}' AND table = '{self.ns}.{table}'"
+        )
+        if found[0][0] == 0:
+            raise NoOp("system.iceberg_history has no row for the table")
+        return f"system.iceberg_history reads {found[0][0]} snapshot(s)"
+
+    # -- refs --------------------------------------------------------------------------------
+
+    def create_branch(self) -> str:
+        table = self._fresh("branch")
+        self.sql(f"ALTER TABLE {self.t(table)} CREATE BRANCH probe_branch")
+        refs = sorted(self.iceberg(table).metadata.refs)
+        if "probe_branch" not in refs:
+            raise NoOp(f"returned success and the refs are {refs}")
+        return f"refs now {refs}"
+
+    def create_tag(self) -> str:
+        table = self._fresh("tag")
+        self.sql(f"ALTER TABLE {self.t(table)} CREATE TAG probe_tag")
+        refs = sorted(self.iceberg(table).metadata.refs)
+        if "probe_tag" not in refs:
+            raise NoOp(f"returned success and the refs are {refs}")
+        return f"refs now {refs}"
+
+    def write_to_branch(self) -> str:
+        table = self._fresh("wap")
+        self.sql(f"INSERT INTO {self.t(table)} SETTINGS iceberg_branch = 'audit' VALUES (7, 70)")
+        main = self._py_rows(table)
+        if main != SEED:
+            raise NoOp(f"the branch write reached main: main reads {main}")
+        refs = sorted(self.iceberg(table).metadata.refs)
+        if "audit" not in refs:
+            raise NoOp(f"returned success and the refs are {refs}")
+        return f"main unchanged; refs {refs}"
+
+    # -- maintenance -------------------------------------------------------------------------
+
+    def rollback(self) -> str:
+        table = self._fresh("rollback")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (4, 40)")
+        first = self._snapshots(table)[0].snapshot_id
+        self.sql(f"ALTER TABLE {self.t(table)} EXECUTE rollback_to_snapshot({first})")
+        rows_now = self._py_rows(table)
+        if rows_now != SEED:
+            raise NoOp(f"returned success and the table reads {rows_now}")
+        return "rolled back to 3 rows"
+
+    def expire_snapshots(self) -> str:
+        table = self._fresh("expire")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (4, 40)")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (5, 50)")
+        before = len(self._snapshots(table))
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        self.sql(
+            f"ALTER TABLE {self.t(table)} EXECUTE expire_snapshots('{now}') "
+            f"SETTINGS allow_experimental_expire_snapshots = 1"
+        )
+        after = len(self._snapshots(table))
+        if after >= before:
+            raise NoOp(f"returned success and history went {before} -> {after}")
+        return f"history {before} -> {after} snapshot(s)"
+
+    def compaction(self) -> str:
+        table = self._fresh("compact")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (4, 40)")
+        before = len(list(self.iceberg(table).scan().plan_files()))
+        self.sql(
+            f"OPTIMIZE TABLE {self.t(table)} SETTINGS allow_experimental_iceberg_compaction = 1"
+        )
+        after = len(list(self.iceberg(table).scan().plan_files()))
+        if after >= before:
+            raise NoOp(f"returned success and data files went {before} -> {after}")
+        return self._expect(table, SEED + [(4, 40)], f"{before} -> {after} data file(s), data kept")
+
+    # -- catalog -----------------------------------------------------------------------------
+
+    def rename_table(self) -> str:
+        table = self._fresh("rename")
+        target = self.name("renamed")
+        self.sql(f"RENAME TABLE {self.t(table)} TO {self.t(target)}")
+        self.created = [target if c == table else c for c in self.created]
+        found = self._py_rows(target)
+        if found != SEED:
+            raise NoOp(f"renamed, and the data is unreadable under the new name: {found}")
+        return "renamed, and its 3 rows read back"
+
+    def drop_table(self) -> str:
+        table = self._empty("droppable")
+        self.sql(f"DROP TABLE {self.t(table)}")
+        if self.pyiceberg().table_exists((self.ns, table)):
+            raise NoOp("returned success and the catalog still has it")
+        self.created.remove(table)
+        return "gone from the catalog"
+
+    # -- teardown ----------------------------------------------------------------------------
+
+    def drop_everything(self) -> None:
+        if not self.created:
+            return
+        if self.keep:
+            print(f"\nCAPABILITY_KEEP=1; left {len(self.created)} table(s) behind")
+            return
+        dropped, left = 0, []
+        for table in self.created:
+            try:
+                if self.pyiceberg().table_exists((self.ns, table)):
+                    self.pyiceberg().purge_table((self.ns, table))
+                dropped += 1
+            except Exception as exc:  # noqa: BLE001 - teardown is best effort, by design
+                left.append(f"{table} ({_one_line(exc, 80)})")
+        print(f"\ndropped {dropped} probe table(s)" + (f"; left behind {left}" if left else ""))
+
+
+PROBES = [
+    ("session", "chDB attaches the catalog (DataLakeCatalog, catalog_type 'onelake')", "session"),
+    ("create", "CREATE TABLE", "create_table"),
+    ("create", "CREATE TABLE ... AS SELECT", "ctas"),
+    ("create", "PARTITION BY p, then INSERT", "partitioned"),
+    ("create", "ORDER BY at create (sort order)", "sorted_at_create"),
+    ("write", "INSERT INTO ... VALUES", "insert_into"),
+    ("write", "INSERT INTO ... SELECT", "insert_select"),
+    ("write", "INSERT OVERWRITE", "insert_overwrite"),
+    ("write", "INSERT OVERWRITE ... PARTITION (p = 'a')", "overwrite_partition"),
+    ("write", "DELETE FROM", "delete_from"),
+    ("write", "ALTER TABLE ... DELETE WHERE", "alter_delete"),
+    ("write", "UPDATE ... SET", "update"),
+    ("write", "ALTER TABLE ... UPDATE", "alter_update"),
+    ("write", "MERGE INTO", "merge_into"),
+    ("write", "TRUNCATE TABLE", "truncate"),
+    ("schema", "ALTER TABLE ADD COLUMN", "add_column"),
+    ("schema", "ALTER TABLE DROP COLUMN", "drop_column"),
+    ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
+    ("schema", "ALTER TABLE ADD PARTITION FIELD (partition evolution)", "partition_evolution"),
+    ("schema", "ALTER TABLE SET TBLPROPERTIES", "set_property"),
+    ("schema", "ALTER TABLE MODIFY ORDER BY (sort order evolution)", "sort_order_evolution"),
+    ("read", "time travel, SETTINGS iceberg_snapshot_id", "time_travel"),
+    ("read", "metadata (system.iceberg_history)", "metadata_tables"),
+    ("refs", "ALTER TABLE ... CREATE BRANCH", "create_branch"),
+    ("refs", "ALTER TABLE ... CREATE TAG", "create_tag"),
+    ("refs", "write to a branch (SETTINGS iceberg_branch)", "write_to_branch"),
+    ("maintenance", "ALTER TABLE ... EXECUTE rollback_to_snapshot", "rollback"),
+    ("maintenance", "ALTER TABLE ... EXECUTE expire_snapshots", "expire_snapshots"),
+    ("maintenance", "OPTIMIZE TABLE (compaction)", "compaction"),
+    ("catalog", "RENAME TABLE, then read", "rename_table"),
+    ("catalog", "DROP TABLE (chDB sends purgeRequested=false)", "drop_table"),
+]
+
+
+def write_step_summary(probe: ChdbCapability) -> None:
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    counts = probe.report.tally()
+    lines = [
+        "## OneLake Iceberg REST catalog, asked by chDB",
+        "",
+        f"{counts[SUPPORTED]} supported · {counts[REFUSED]} refused · "
+        f"{counts[NOOP]} accepted then ignored · "
+        f"{counts[SKIPPED]} skipped · {counts[BROKEN]} could not be asked",
+        "",
+        *probe.report.markdown(),
+        "",
+        f"chdb `{probe.version}` · namespace `{probe.ns}` · run `{probe.run}`",
+    ]
+    with open(target, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+
+
+def main() -> int:
+    cfg = Config.from_env()
+    probe = ChdbCapability(cfg)
+    print(f"workspace {cfg.workspace_id}  lakehouse {cfg.lakehouse_id}  namespace {NAMESPACE}")
+
+    try:
+        for group, question, method in PROBES:
+            ok = probe.report.run(group, question, getattr(probe, method))
+            if not ok and method == "session":
+                print("\nstopped: no chDB session, so nothing below could be asked")
+                write_step_summary(probe)
+                return 1
+    finally:
+        try:
+            probe.drop_everything()
+        except Exception as exc:  # noqa: BLE001 - teardown must not mask the findings
+            print(f"  warning: teardown failed: {_one_line(exc, 200)}")
+        probe.engine.close()
+
+    counts = probe.report.tally()
+    print("\n" + "\n".join(probe.report.markdown()))
+    print(
+        f"\n{counts[SUPPORTED]} supported, {counts[REFUSED]} refused, "
+        f"{counts[NOOP]} accepted then ignored, "
+        f"{counts[SKIPPED]} skipped, {counts[BROKEN]} could not be asked"
+    )
+    write_step_summary(probe)
+    return 0
+
+
+if __name__ == "__main__":
+    code = main()
+    sys.stdout.flush()
+    # The embedded ClickHouse server may leave threads behind; a plain exit could then hang until
+    # the job timeout. The findings are already printed and summarised.
+    os._exit(code)

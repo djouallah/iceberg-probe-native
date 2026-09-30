@@ -1,0 +1,7 @@
+# The Sail capability probe: pyiceberg's set for the cross-check reads, plus Sail and the Spark
+# Connect client it serves. pyspark-client and never pyspark, as the read benchmark explains.
+azure-identity>=1.19
+pyiceberg[pyarrow,adlfs]>=0.12.0
+pyarrow>=17
+pysail>=0.7.2
+pyspark-client

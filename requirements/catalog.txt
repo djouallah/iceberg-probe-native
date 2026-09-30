@@ -1,0 +1,3 @@
+azure-identity>=1.19
+pyiceberg[pyarrow,adlfs]>=0.12.0
+pyarrow>=17
