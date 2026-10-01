@@ -28,6 +28,8 @@ from datetime import UTC, datetime
 
 from catalog_capability import (
     BROKEN,
+    EVOLVE_FIRST,
+    EVOLVE_THEN,
     NAMESPACE,
     NESTED_TYPES,
     NOOP,
@@ -41,6 +43,8 @@ from catalog_capability import (
     Refused,
     Report,
     Skip,
+    evolution_check,
+    evolve_spec,
     iceberg_schema,
     partition_result,
     promotion_check,
@@ -384,6 +388,15 @@ class ChdbCapability:
             raise NoOp(f"returned success and the schema is still {names}")
         return self._expect(table, SEED, "renamed, data kept", ("id", "v2"))
 
+    def write_after_evolution(self) -> str:
+        """chDB has no statement to evolve a spec, so pyiceberg evolves it between chDB's writes."""
+        table = self._empty("evowrite")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES {_values(EVOLVE_FIRST)}")
+        evolve_spec(self.iceberg(table))
+        self.sql(f"INSERT INTO {self.t(table)} VALUES {_values(EVOLVE_THEN)}")
+        count = self.sql(f"SELECT count() FROM {self.t(table)}")[0][0]
+        return evolution_check(self.iceberg(table), count) + "; spec evolved by pyiceberg"
+
     def type_promotion(self) -> str:
         table = self._py_create("promote", schema=promotion_schema())
         self.sql(f"INSERT INTO {self.t(table)} VALUES (1, 7)")
@@ -569,6 +582,7 @@ PROBES = [
     ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
     ("schema", "MODIFY COLUMN c Int64 (int -> long)", "type_promotion"),
     ("schema", "ALTER TABLE ADD PARTITION FIELD (partition evolution)", "partition_evolution"),
+    ("schema", "INSERT after pyiceberg evolves the spec", "write_after_evolution"),
     ("schema", "ALTER TABLE SET TBLPROPERTIES", "set_property"),
     ("schema", "ALTER TABLE MODIFY ORDER BY (sort order evolution)", "sort_order_evolution"),
     ("read", "time travel, SETTINGS iceberg_snapshot_id", "time_travel"),

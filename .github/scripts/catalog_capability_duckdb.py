@@ -35,6 +35,8 @@ import sys
 
 from catalog_capability import (
     BROKEN,
+    EVOLVE_FIRST,
+    EVOLVE_THEN,
     NAMESPACE,
     NESTED_TYPES,
     NOOP,
@@ -48,6 +50,7 @@ from catalog_capability import (
     Refused,
     Report,
     Skip,
+    evolution_check,
     partition_result,
     promotion_check,
     transform_case,
@@ -509,6 +512,18 @@ class DuckDBCapability:
             raise NoOp(f"returned success and the schema is {cols}")
         return f"schema now {cols}"
 
+    def write_after_evolution(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._create("evowrite")
+        first = ", ".join(f"({i}, {v})" for i, v in EVOLVE_FIRST)
+        then = ", ".join(f"({i}, {v})" for i, v in EVOLVE_THEN)
+        self.sql(f"INSERT INTO {self.t(table)} VALUES {first}")
+        self.sql(f"ALTER TABLE {self.t(table)} SET PARTITIONED BY (bucket(4, id))")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES {then}")
+        count = self.sql(f"SELECT count(*) FROM {self.t(table)}")[0][0]
+        return evolution_check(self.iceberg(table), count)
+
     def type_promotion(self) -> str:
         if not self.can_create:
             raise Skip("no table could be created")
@@ -780,6 +795,7 @@ PROBES = [
     ("schema", "ALTER TABLE ... RENAME TO (table)", "rename_table"),
     ("schema", "set_iceberg_table_properties", "set_property"),
     ("schema", "ALTER TABLE ... SET PARTITIONED BY (partition evolution)", "partition_evolution"),
+    ("schema", "INSERT after SET PARTITIONED BY, read across both specs", "write_after_evolution"),
     ("read", "time travel, AT (VERSION => <snapshot>)", "time_travel"),
     ("read", "iceberg_snapshots()", "metadata_snapshots"),
     ("read", "iceberg_metadata()", "metadata_files"),

@@ -36,6 +36,7 @@ operation · `—` not probed
 | Rename column | yes | yes | na | yes |
 | Type promotion (int → long) | yes | yes | na | yes |
 | Partition evolution | yes | yes | na | na |
+| Write after partition evolution | yes | yes | yes ¹⁶ | yes ¹⁶ |
 | Set table property | yes | yes | na | na |
 | Sort order at create | yes | yes | na | no ⁸ |
 | Sort order evolution | yes | yes | na | na |
@@ -104,6 +105,8 @@ The catalog itself refuses or ignores these, so no engine can do them.
 15. A `timestamp` (no zone) is written shifted by chDB's session time zone: `03:04` written on a
     UTC+10 machine reads back as `17:04` the day before. With `SET session_timezone = 'UTC'` it is
     written as given.
+16. Sail and chDB have no statement to evolve a spec; pyiceberg added `bucket(4, id)` between the
+    engine's two writes. The data files sit on both specs and every row reads back.
 
 ## Other readings
 
@@ -124,7 +127,8 @@ Sail 0.7.2, and chDB 4.4.0 under WSL, as chDB has no Windows build. chDB 4.4.0 e
 26.9.2.1, the current stable line; ClickHouse master has the same Iceberg `EXECUTE` commands
 (`expire_snapshots`, `remove_orphan_files`) and the same drop.
 
-The partition-transform, type and type-promotion rows were read on 2026-10-01: pyiceberg (with
+The partition-transform, type, type-promotion and write-after-evolution rows were read on
+2026-10-01: pyiceberg (with
 `pyiceberg-core` 0.10.1), Sail and chDB under WSL, DuckDB with the CLI v2.1.0-alpha43762.
 
 ```bash

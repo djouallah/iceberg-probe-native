@@ -506,6 +506,38 @@ def verdict(results: list[tuple[str, str, str]]) -> str:
     return "all of " + ", ".join(ok)
 
 
+# Write after partition evolution: these rows land unpartitioned, the spec gains bucket(4, id),
+# then the second set is written under the new spec.
+EVOLVE_FIRST = [(1, 10), (2, 20)]
+EVOLVE_THEN = [(i, i * 10) for i in range(3, 9)]
+
+
+def evolve_spec(tbl) -> None:
+    """Add bucket(4, id) to the table's spec, through pyiceberg."""
+    from pyiceberg.transforms import BucketTransform
+
+    with tbl.update_spec() as update:
+        update.add_field("id", BucketTransform(4), "id_bucket")
+
+
+def evolution_check(tbl, engine_count: int | None = None) -> str:
+    """Data files sit on both the first spec and the evolved one, and every row reads back."""
+    total = len(EVOLVE_FIRST) + len(EVOLVE_THEN)
+    current = tbl.spec().spec_id
+    if current == 0:
+        raise NoOp("the spec never changed")
+    on = sorted({task.file.spec_id for task in tbl.scan().plan_files()})
+    count = tbl.scan().to_arrow().num_rows
+    if on != sorted({0, current}):
+        raise NoOp(f"data files on spec(s) {on}, expected 0 and {current}; pyiceberg reads {count}")
+    if count != total:
+        raise NoOp(f"pyiceberg reads {count} rows, expected {total}")
+    if engine_count is not None and engine_count != total:
+        raise NoOp(f"pyiceberg reads {total} rows, the engine reads {engine_count}")
+    both = ", by pyiceberg and the engine" if engine_count is not None else ""
+    return f"data files on specs {on}; all {total} rows read{both}"
+
+
 def promotion_schema():
     """(id long, c int), for the int -> long promotion."""
     from pyiceberg.schema import Schema
@@ -763,6 +795,13 @@ class Capability:
         with table.update_schema() as update:
             update.update_column("c", LongType())
         return promotion_check(table.refresh())
+
+    def write_after_evolution(self) -> str:
+        table = self.create("evowrite")
+        table.append(rows(EVOLVE_FIRST))
+        evolve_spec(table)
+        table.append(rows(EVOLVE_THEN))
+        return evolution_check(table.refresh())
 
     def create_sorted(self) -> str:
         from pyiceberg.table.sorting import SortField, SortOrder
@@ -1162,6 +1201,7 @@ PROBES = [
     ("commit", "rename a column", "rename_column"),
     ("commit", "type promotion, int -> long", "type_promotion"),
     ("commit", "partition evolution (add a bucket field)", "partition_evolution"),
+    ("commit", "write after partition evolution, read across both specs", "write_after_evolution"),
     ("commit", "sort order evolution, update_sort_order()", "sort_order_evolution"),
     ("commit", "set a table property", "set_property"),
     ("endpoint", "credential vending, GET .../credentials", "credential_vending"),
