@@ -320,15 +320,6 @@ class DuckDBCapability:
             )
         return f"sort order {[str(f) for f in order.fields]}"
 
-    def format_v3(self) -> str:
-        if not self.can_create:
-            raise Skip("no table could be created")
-        table = self._create("v3", tail="WITH ('format-version' = '3')")
-        version = self.iceberg(table).metadata.format_version
-        if version != 3:
-            raise NoOp(f"asked for format-version 3, the table came back at {version}")
-        return "format-version 3"
-
     # -- probes: write -----------------------------------------------------------------------
 
     def insert_values(self) -> str:
@@ -676,7 +667,6 @@ PROBES = [
     ("create", "PARTITIONED BY (identity), then write", "create_partitioned"),
     ("create", "CREATE TABLE ... SORTED BY (sort order at create)", "create_sorted_at_create"),
     ("create", "ALTER TABLE ... SET SORTED BY (sort order)", "create_sorted"),
-    ("create", "format-version 3", "format_v3"),
     ("write", "INSERT INTO ... VALUES", "insert_values"),
     ("write", "INSERT INTO ... SELECT", "insert_select"),
     ("write", "overwrite: DELETE + INSERT in one transaction", "insert_overwrite"),

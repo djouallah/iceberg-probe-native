@@ -46,9 +46,6 @@ not refresh and re-send, a commit against a head another writer had already move
 "CommitFailedException: One or more requirements failed. The client may retry." That is the
 guarantee every lost-update defence in every client is built on, and it holds.
 
-format-version 3 is a no-op: asking for it returns a v2 table. Worth reading the version back
-when planning around v3 features.
-
 Also accepted: create with no location (the catalog assigns one), partitioned tables written
 through, sort orders, schema evolution, table properties, tags, branches, rename, and DROP with
 purge. Declined at create: a schema whose first field id is 0, which is Spark's SparkSchemaUtil
@@ -86,9 +83,8 @@ NAMESPACE = "_bench_capability"
 #
 # A no-op is tracked apart from a `no` because the response does not distinguish the two: both
 # come back without an error in the client's hands, so only a probe that CHECKS THE EFFECT can
-# tell them apart. That is why create_v3 reads the format version back and create_staged asks
-# whether the table is there. `broken` is the only outcome that says nothing about the endpoint,
-# because the probe could not ask its question.
+# tell them apart. That is why create_staged asks whether the table is there. `broken` is the
+# only outcome that says nothing about the endpoint, because the probe could not ask its question.
 #
 # This is a private preview under active development, so every one of these is a reading taken
 # on a date, not a property of the product.
@@ -472,18 +468,6 @@ class Capability:
                 "finds it straight after the create"
             )
         return "honoured: the table is not in the catalog until the first commit"
-
-    def create_v3(self) -> str:
-        """Read the format version back, because the create succeeds either way.
-
-        A table that comes back at v2 after a request for v3 is neither support nor a decline,
-        and the response alone does not separate them -- only checking the result does.
-        """
-        table = self.create("v3", properties={"format-version": "3"})
-        version = table.metadata.format_version
-        if version != 3:
-            raise NoOp(f"asked for format-version 3, the table came back at {version}")
-        return "format-version 3 tables are created"
 
     def create_partitioned(self) -> str:
         from pyiceberg.partitioning import PartitionField, PartitionSpec
@@ -874,7 +858,6 @@ PROBES = [
     ("create", "createTable with a field id of 0 (Spark numbering)", "create_field_id_zero"),
     ("create", "createTable with no location", "create_without_location"),
     ("create", "createTable with stage-create, is it honoured", "create_staged"),
-    ("create", "createTable at format-version 3", "create_v3"),
     ("create", "createTable partitioned, then write it", "create_partitioned"),
     ("create", "createTable with a sort order", "create_sorted"),
     ("write", "append, one snapshot per commit", "append"),

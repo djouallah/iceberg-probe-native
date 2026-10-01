@@ -7,6 +7,7 @@ operation · `—` not probed
 
 | Operation | pyiceberg | DuckDB | Sail | chDB |
 |---|---|---|---|---|
+| SQL | na | yes | yes | yes |
 | CREATE TABLE | yes | yes | yes | no ⁸ |
 | INSERT / append | yes | yes | yes | yes ⁸ |
 | DELETE | yes ⁷ | yes | no ¹ | yes |
@@ -15,6 +16,7 @@ operation · `—` not probed
 | Drop table with purge | yes | yes | yes | no ⁹ |
 | Create / drop namespace | yes | yes | yes | na |
 | CREATE TABLE AS SELECT | na | yes | no ⁴ | no ⁸ |
+| CREATE OR REPLACE TABLE | na | na | na | — |
 | UPDATE | na | yes | yes | yes ¹⁰ |
 | MERGE INTO / upsert | yes | yes | yes | na |
 | INSERT OVERWRITE, whole table | yes | yes ⁵ | yes | na |
