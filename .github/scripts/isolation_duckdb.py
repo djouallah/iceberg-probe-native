@@ -21,6 +21,10 @@ what a transaction reads, when its snapshot is taken, what it commits and when t
 ROLLBACK, a failing statement, visibility of its own uncommitted rows, two tables in one
 transaction, two DuckDB connections racing.
 
+PART 3, COMBINATIONS. No concurrent writer: which DDL and DML sequences one transaction accepts
+(TRUNCATE then INSERT, DROP then CREATE, CREATE then INSERT, ALTER then write, ...), and whether
+what the catalog holds afterwards is what the sequence says, read back through pyiceberg.
+
 EVERY CONNECTION RUNS `SET iceberg_use_metadata_log = false`. With it on (the default), DuckDB picks
 the table metadata as of the transaction start by comparing its own clock with the catalog's
 commit timestamps, and a catalog clock ahead of the client hides the newest commit, its own
@@ -35,6 +39,7 @@ date rather than a property of the product.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -245,6 +250,7 @@ class DuckDBIsolation:
         self.created: list[str] = []
         self.levels: dict[tuple[str, str], tuple[str, str]] = {}
         self.transactions: list[tuple[str, str, str]] = []
+        self.combos: list[tuple[str, str, str, str]] = []
 
     # -- plumbing --------------------------------------------------------------------------------
 
@@ -539,6 +545,71 @@ class DuckDBIsolation:
             f"{e2 or 'ok'}; {final}"
         )
 
+    # -- part 3 ----------------------------------------------------------------------------------
+
+    def state(self, table: str):
+        """(columns, sorted rows) as the catalog holds the table, or None if it is gone."""
+        if not self.catalog.table_exists((NAMESPACE, table)):
+            return None
+        tbl = self.catalog.load_table((NAMESPACE, table))
+        cols = tuple(f.name for f in tbl.schema().fields)
+        found = tbl.scan().to_arrow().to_pylist()
+        return cols, sorted((tuple(r[c] for c in cols) for r in found), key=repr)
+
+    def combo(self, combo) -> None:
+        _say(f"\n[combo {combo.key}] {combo.title}")
+        self.refresh()
+        t = self.table(f"cb_{combo.key}")
+        n = f"{t}_new"
+        if self.catalog.table_exists((NAMESPACE, n)):
+            self.catalog.purge_table((NAMESPACE, n))
+        self.created.append(n)
+        before = self.state(t)
+        mark = len(self.proxy.log)
+        conn = self.conn()
+        failed = ""
+        conn.execute("BEGIN")
+        for statement in combo.statements:
+            try:
+                conn.execute(statement.format(t=self.t(t), n=self.t(n)))
+            except Exception as exc:  # noqa: BLE001 - the refusal is the reading
+                failed = f"{statement.split()[0]} refused: {_err(exc, 300)}"
+                break
+        if failed:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+        conn.close()
+        sent = [
+            f"{m} {p.rsplit('/', 1)[-1].replace(n, 'n').replace(t, 't')} {s}"
+            for m, p, s, _ in self.proxy.log[mark:]
+            if m in ("POST", "DELETE")
+        ]
+        got_t, got_n = self.state(t), self.state(n)
+
+        def want(spec):
+            return (tuple(spec[0]), sorted(map(tuple, spec[1]), key=repr)) if spec else None
+
+        want_t, want_n = want(combo.t), want(combo.n)
+        spec = ""
+        if combo.spec and got_t:
+            fields = self.catalog.load_table((NAMESPACE, t)).spec().fields
+            spec = str([str(f.transform) for f in fields])
+        if failed:
+            outcome = "refused" if (got_t == before and got_n is None) else "PARTIAL"
+        elif got_t == want_t and got_n == want_n and (not combo.spec or combo.spec in spec):
+            outcome = "works"
+        else:
+            outcome = "WRONG"
+        detail = f"t {got_t}; n {got_n}; sent {sent}"
+        if spec:
+            detail += f"; spec {spec}"
+        if failed:
+            detail = f"{failed}; {detail}"
+        elif outcome == "WRONG":
+            detail += f"; expected t {want_t}, n {want_n}"
+        self.combos.append((combo.key, combo.title, outcome, detail))
+        _say(f"     {outcome:<9} {detail}")
+
     # -- teardown --------------------------------------------------------------------------------
 
     def teardown(self) -> None:
@@ -602,10 +673,191 @@ TRANSACTIONS = [
 ]
 
 
+# --------------------------------------------------------------------------------------------
+# part 3: DDL and DML combined in one transaction, no concurrent writer
+# --------------------------------------------------------------------------------------------
+
+SEED_COLS = ("id", "v")
+
+
+@dataclass(frozen=True)
+class Combo:
+    key: str
+    title: str
+    statements: tuple  # after BEGIN; ends with COMMIT or ROLLBACK. {t} seeded, {n} a new name
+    t: tuple | None  # (columns, rows) the seeded table must hold afterwards; None = gone
+    n: tuple | None = None  # the same for {n}; None = must not exist
+    spec: str = ""  # a partition transform {t}'s spec must carry afterwards
+
+
+UNCHANGED = (SEED_COLS, SEED)
+DOUBLED_T = (SEED_COLS, DOUBLED)
+
+COMBOS = [
+    Combo(
+        "truncate_insert",
+        "TRUNCATE, INSERT",
+        ("TRUNCATE {t}", "INSERT INTO {t} VALUES (9, 90)", "COMMIT"),
+        (SEED_COLS, [(9, 90)]),
+    ),
+    Combo(
+        "delete_insert",
+        "DELETE all, INSERT",
+        ("DELETE FROM {t}", "INSERT INTO {t} VALUES (9, 90)", "COMMIT"),
+        (SEED_COLS, [(9, 90)]),
+    ),
+    Combo(
+        "drop_create",
+        "DROP TABLE, CREATE TABLE the same name with a new column, INSERT",
+        (
+            "DROP TABLE {t}",
+            "CREATE TABLE {t} (id BIGINT, v BIGINT, w BIGINT)",
+            "INSERT INTO {t} VALUES (9, 90, 900)",
+            "COMMIT",
+        ),
+        (("id", "v", "w"), [(9, 90, 900)]),
+    ),
+    Combo(
+        "drop_create_as_select",
+        "CREATE a copy AS SELECT, DROP TABLE, CREATE TABLE the same name AS SELECT from the copy",
+        (
+            "CREATE TABLE {n} AS SELECT id, v * 2 AS v FROM {t}",
+            "DROP TABLE {t}",
+            "CREATE TABLE {t} AS SELECT * FROM {n}",
+            "COMMIT",
+        ),
+        DOUBLED_T,
+        DOUBLED_T,
+    ),
+    Combo(
+        "create_or_replace_self",
+        "CREATE OR REPLACE TABLE t AS SELECT ... FROM t",
+        ("CREATE OR REPLACE TABLE {t} AS SELECT id, v * 2 AS v FROM {t}", "COMMIT"),
+        DOUBLED_T,
+    ),
+    Combo(
+        "create_insert",
+        "CREATE TABLE, INSERT",
+        ("CREATE TABLE {n} (id BIGINT, v BIGINT)", "INSERT INTO {n} VALUES (1, 1)", "COMMIT"),
+        UNCHANGED,
+        (SEED_COLS, [(1, 1)]),
+    ),
+    Combo(
+        "ctas",
+        "CREATE TABLE AS SELECT from the seeded table",
+        ("CREATE TABLE {n} AS SELECT id, v * 2 AS v FROM {t}", "COMMIT"),
+        UNCHANGED,
+        DOUBLED_T,
+    ),
+    Combo(
+        "create_insert_other",
+        "CREATE TABLE, INSERT into another, existing table",
+        ("CREATE TABLE {n} (id BIGINT, v BIGINT)", "INSERT INTO {t} VALUES (4, 40)", "COMMIT"),
+        UNCHANGED,
+    ),
+    Combo(
+        "add_column_insert",
+        "ADD COLUMN, INSERT a row that fills it",
+        ("ALTER TABLE {t} ADD COLUMN w BIGINT", "INSERT INTO {t} VALUES (4, 40, 400)", "COMMIT"),
+        (("id", "v", "w"), [(1, 10, None), (2, 20, None), (3, 30, None), (4, 40, 400)]),
+    ),
+    Combo(
+        "add_column_update",
+        "ADD COLUMN, UPDATE it",
+        ("ALTER TABLE {t} ADD COLUMN w BIGINT", "UPDATE {t} SET w = v * 10", "COMMIT"),
+        (("id", "v", "w"), [(1, 10, 100), (2, 20, 200), (3, 30, 300)]),
+    ),
+    Combo(
+        "rename_column_insert",
+        "RENAME COLUMN, INSERT",
+        ("ALTER TABLE {t} RENAME COLUMN v TO v2", "INSERT INTO {t} VALUES (4, 40)", "COMMIT"),
+        (("id", "v2"), [*SEED, (4, 40)]),
+    ),
+    Combo(
+        "drop_column_insert",
+        "DROP COLUMN, INSERT",
+        ("ALTER TABLE {t} DROP COLUMN v", "INSERT INTO {t} VALUES (4)", "COMMIT"),
+        (("id",), [(1,), (2,), (3,), (4,)]),
+    ),
+    Combo(
+        "partition_insert",
+        "SET PARTITIONED BY (bucket(4, id)), INSERT",
+        (
+            "ALTER TABLE {t} SET PARTITIONED BY (bucket(4, id))",
+            "INSERT INTO {t} VALUES (4, 40)",
+            "COMMIT",
+        ),
+        (SEED_COLS, [*SEED, (4, 40)]),
+        spec="bucket",
+    ),
+    Combo(
+        "insert_update",
+        "INSERT, UPDATE the row just inserted",
+        ("INSERT INTO {t} VALUES (4, 40)", "UPDATE {t} SET v = 41 WHERE id = 4", "COMMIT"),
+        (SEED_COLS, [*SEED, (4, 41)]),
+    ),
+    Combo(
+        "insert_delete",
+        "INSERT, DELETE the row just inserted",
+        ("INSERT INTO {t} VALUES (4, 40)", "DELETE FROM {t} WHERE id = 4", "COMMIT"),
+        UNCHANGED,
+    ),
+    Combo(
+        "update_delete",
+        "UPDATE a row, then DELETE it",
+        ("UPDATE {t} SET v = 11 WHERE id = 1", "DELETE FROM {t} WHERE id = 1", "COMMIT"),
+        (SEED_COLS, [(2, 20), (3, 30)]),
+    ),
+    Combo(
+        "merge_twice",
+        "MERGE, then MERGE the same row again",
+        (MERGE_ID.replace("{id}", "1"), MERGE_ID.replace("{id}", "1"), "COMMIT"),
+        (SEED_COLS, [(1, 12), (2, 20), (3, 30)]),
+    ),
+    Combo(
+        "insert_select_delete",
+        "INSERT ... SELECT from the table, DELETE the originals",
+        (
+            "INSERT INTO {t} SELECT id + 10, v FROM {t}",
+            "DELETE FROM {t} WHERE id < 10",
+            "COMMIT",
+        ),
+        (SEED_COLS, [(11, 10), (12, 20), (13, 30)]),
+    ),
+    Combo(
+        "truncate_insert_rollback",
+        "TRUNCATE, INSERT, ROLLBACK",
+        ("TRUNCATE {t}", "INSERT INTO {t} VALUES (9, 90)", "ROLLBACK"),
+        UNCHANGED,
+    ),
+    Combo(
+        "drop_rollback",
+        "DROP TABLE, ROLLBACK",
+        ("DROP TABLE {t}", "ROLLBACK"),
+        UNCHANGED,
+    ),
+    Combo(
+        "drop_create_rollback",
+        "DROP TABLE, CREATE TABLE the same name, ROLLBACK",
+        ("DROP TABLE {t}", "CREATE TABLE {t} (id BIGINT, v BIGINT, w BIGINT)", "ROLLBACK"),
+        UNCHANGED,
+    ),
+    Combo(
+        "create_rollback",
+        "CREATE TABLE, INSERT, ROLLBACK",
+        ("CREATE TABLE {n} (id BIGINT, v BIGINT)", "INSERT INTO {n} VALUES (1, 1)", "ROLLBACK"),
+        UNCHANGED,
+    ),
+]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-race", action="store_true", help="run each race's statements alone")
-    parser.add_argument("--only", help="comma-separated race / transaction keys, or levels / tx")
+    parser.add_argument(
+        "--only",
+        help="comma-separated race / transaction / combination keys, or levels / tx / combos",
+    )
     args = parser.parse_args()
     only = set(args.only.split(",")) if args.only else None
 
@@ -624,6 +876,9 @@ def main() -> int:
             for key, title, fn in TRANSACTIONS:
                 if wanted(key, "tx"):
                     probe.tx(key, title, fn(probe))
+            for combo in COMBOS:
+                if wanted(combo.key, "combos"):
+                    probe.combo(combo)
     finally:
         try:
             probe.teardown()
@@ -641,6 +896,10 @@ def main() -> int:
         _say("\n| Transaction | Outcome | What came back |\n|---|---|---|")
         for key, outcome, detail in probe.transactions:
             _say(f"| {key} | {outcome} | {detail.replace('|', '/')[:300]} |")
+    if probe.combos:
+        _say("\n| In one transaction | Outcome | What came back |\n|---|---|---|")
+        for _key, title, outcome, detail in probe.combos:
+            _say(f"| {title} | {outcome} | {detail.replace('|', '/')[:400]} |")
     return 0
 
 

@@ -163,6 +163,30 @@ The columns are table properties. `serializable` sets nothing, which is Iceberg'
 | Two tables in one transaction | refused at the second table: `Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without atomic multi-table commit support`. The catalog has no multi-table commit. |
 | Two DuckDB transactions update the same row | the second COMMIT is refused |
 
+| Statements in one `BEGIN ... COMMIT`, no concurrent writer | DuckDB |
+|---|---|
+| TRUNCATE, INSERT | works, in one commit |
+| DELETE everything, INSERT | works, in one commit |
+| `INSERT ... SELECT` from the table, then DELETE the originals | works |
+| INSERT, then UPDATE or DELETE the row just inserted | works |
+| UPDATE a row, then DELETE it | works |
+| MERGE the same row twice | works |
+| ADD COLUMN, then INSERT or UPDATE it | works, in one commit |
+| RENAME COLUMN or DROP COLUMN, then INSERT | works |
+| SET PARTITIONED BY, then INSERT | works |
+| CREATE TABLE, INSERT; CREATE TABLE AS SELECT | works, but see below |
+| TRUNCATE + INSERT, then ROLLBACK; DROP TABLE, then ROLLBACK | nothing is sent; the table is unchanged |
+| DROP TABLE, CREATE TABLE the same name | no: `Cannot create table deleted within a transaction` |
+| CREATE OR REPLACE TABLE | no: `CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements` |
+| DROP TABLE plus a write to another table | no: `cannot commit this transaction atomically because it mixes table updates with rename/drop requests` |
+| CREATE TABLE, INSERT into another table | no: the two-table refusal above |
+| CREATE TABLE, INSERT, ROLLBACK | **the new table stays, empty** |
+
+CREATE TABLE is not part of the transaction here. It reaches the catalog when the statement runs,
+not at COMMIT, because OneLake refuses a staged create and DuckDB is attached with
+`STAGE_CREATE_TABLES false`. A ROLLBACK, or a later statement in the transaction failing, leaves
+the new table behind, empty.
+
 Every connection runs `SET iceberg_use_metadata_log = false`. The default, `true` since
 [duckdb-iceberg#1395](https://github.com/duckdb/duckdb-iceberg/pull/1395), reads each table as of
 `BEGIN`. It decides that by comparing the client's clock with the catalog's commit timestamps, and
