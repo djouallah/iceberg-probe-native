@@ -36,14 +36,23 @@ import sys
 from catalog_capability import (
     BROKEN,
     NAMESPACE,
+    NESTED_TYPES,
     NOOP,
     REFUSED,
+    SCALAR_TYPES,
     SKIPPED,
     SUPPORTED,
+    TEMPORAL,
+    TRANSFORM_ROWS,
     NoOp,
     Refused,
     Report,
     Skip,
+    partition_result,
+    promotion_check,
+    transform_case,
+    type_result,
+    verdict,
 )
 
 from bench import auth, scrub
@@ -61,6 +70,34 @@ def _one_line(text: object, limit: int = 700) -> str:
 
 def _say(text: object) -> None:
     print(scrub.scrub(text), flush=True)
+
+
+# Column type and literal for each TYPE_EXPECTED case.
+TYPES = {
+    "decimal": ("DECIMAL(10, 2)", "12.34"),
+    "date": ("DATE", "DATE '2026-01-02'"),
+    "timestamp": ("TIMESTAMP", "TIMESTAMP '2026-01-02 03:04:05.123456'"),
+    "timestamptz": ("TIMESTAMPTZ", "TIMESTAMPTZ '2026-01-02 03:04:05.123456+00'"),
+    "uuid": ("UUID", "UUID '6f1c2d3e-4b5a-4c6d-8e7f-0123456789ab'"),
+    "binary": ("BLOB", "'\\x01\\x02'::BLOB"),
+    "struct": ("STRUCT(a BIGINT, b VARCHAR)", "{'a': 1, 'b': 'x'}"),
+    "list": ("BIGINT[]", "[1, 2, 3]"),
+    "map": ("MAP(VARCHAR, BIGINT)", "MAP {'k': 1}"),
+}
+
+
+def _transform_sql(kind: str) -> tuple[str, str, str]:
+    """(columns, partition transform, VALUES) for one transform_case."""
+    if kind == "bucket":
+        columns, part = "id BIGINT, x BIGINT", "bucket(4, id)"
+        values = [f"({i}, {v})" for i, v in TRANSFORM_ROWS["bucket"]]
+    elif kind == "truncate":
+        columns, part = "id BIGINT, x VARCHAR", "truncate(2, x)"
+        values = [f"({i}, '{v}')" for i, v in TRANSFORM_ROWS["truncate"]]
+    else:
+        columns, part = "id BIGINT, x TIMESTAMP", f"{kind}(x)"
+        values = [f"({i}, TIMESTAMP '{v}')" for i, v in TRANSFORM_ROWS["temporal"]]
+    return columns, part, ", ".join(values)
 
 
 class DuckDBCapability:
@@ -299,6 +336,50 @@ class DuckDBCapability:
         files = len(list(self.iceberg(table).scan().plan_files()))
         return f"spec {spec}; 3 rows over 2 partitions wrote {files} data file(s)"
 
+    def _transform(self, kind: str) -> tuple[str, str, str]:
+        columns, part, values = _transform_sql(kind)
+        _, _, parts = transform_case(kind)
+        try:
+            table = self._create(f"tr_{kind}", columns, f"PARTITIONED BY ({part})")
+            self.sql(f"INSERT INTO {self.t(table)} VALUES {values}")
+        except Refused as exc:
+            return kind, REFUSED, str(exc)
+        return partition_result(self.iceberg(table), kind, parts)
+
+    def _transforms(self, kinds) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        return verdict([self._transform(kind) for kind in kinds])
+
+    def partition_bucket(self) -> str:
+        return self._transforms(["bucket"])
+
+    def partition_truncate(self) -> str:
+        return self._transforms(["truncate"])
+
+    def partition_temporal(self) -> str:
+        return self._transforms(TEMPORAL)
+
+    def _typed(self, name: str) -> tuple[str, str, str]:
+        column, literal = TYPES[name]
+        try:
+            table = self._create(f"type_{name}", f"id BIGINT, x {column}")
+            self.sql(f"INSERT INTO {self.t(table)} VALUES (1, {literal})")
+        except Refused as exc:
+            return name, REFUSED, str(exc)
+        return type_result(self.iceberg(table), name)
+
+    def _types(self, names) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        return verdict([self._typed(name) for name in names])
+
+    def types_scalar(self) -> str:
+        return self._types(SCALAR_TYPES)
+
+    def types_nested(self) -> str:
+        return self._types(NESTED_TYPES)
+
     def create_sorted(self) -> str:
         if not self.can_create:
             raise Skip("no table could be created")
@@ -427,6 +508,14 @@ class DuckDBCapability:
         if "v" in cols:
             raise NoOp(f"returned success and the schema is {cols}")
         return f"schema now {cols}"
+
+    def type_promotion(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._create("promote", "id BIGINT, c INTEGER")
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (1, 7)")
+        self.sql(f"ALTER TABLE {self.t(table)} ALTER COLUMN c TYPE BIGINT")
+        return promotion_check(self.iceberg(table))
 
     def rename_column(self) -> str:
         table = self._fresh("renamecol")
@@ -667,6 +756,11 @@ PROBES = [
     ("create", "PARTITIONED BY (identity), then write", "create_partitioned"),
     ("create", "CREATE TABLE ... SORTED BY (sort order at create)", "create_sorted_at_create"),
     ("create", "ALTER TABLE ... SET SORTED BY (sort order)", "create_sorted"),
+    ("create", "PARTITIONED BY (bucket(4, id)), then write", "partition_bucket"),
+    ("create", "PARTITIONED BY (truncate(2, x)), then write", "partition_truncate"),
+    ("create", "PARTITIONED BY year / month / day / hour, then write", "partition_temporal"),
+    ("create", "types: decimal, date, timestamp, timestamptz, uuid, binary", "types_scalar"),
+    ("create", "nested types: struct, list, map", "types_nested"),
     ("write", "INSERT INTO ... VALUES", "insert_values"),
     ("write", "INSERT INTO ... SELECT", "insert_select"),
     ("write", "overwrite: DELETE + INSERT in one transaction", "insert_overwrite"),
@@ -682,6 +776,7 @@ PROBES = [
     ("schema", "ALTER TABLE ADD COLUMN", "add_column"),
     ("schema", "ALTER TABLE DROP COLUMN", "drop_column"),
     ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
+    ("schema", "ALTER COLUMN c TYPE BIGINT (int -> long)", "type_promotion"),
     ("schema", "ALTER TABLE ... RENAME TO (table)", "rename_table"),
     ("schema", "set_iceberg_table_properties", "set_property"),
     ("schema", "ALTER TABLE ... SET PARTITIONED BY (partition evolution)", "partition_evolution"),

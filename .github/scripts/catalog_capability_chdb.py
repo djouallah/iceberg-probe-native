@@ -29,15 +29,26 @@ from datetime import UTC, datetime
 from catalog_capability import (
     BROKEN,
     NAMESPACE,
+    NESTED_TYPES,
     NOOP,
     REFUSED,
+    SCALAR_TYPES,
     SKIPPED,
     SUPPORTED,
+    TEMPORAL,
+    TRANSFORM_ROWS,
     NoOp,
     Refused,
     Report,
     Skip,
     iceberg_schema,
+    partition_result,
+    promotion_check,
+    promotion_schema,
+    transform_case,
+    type_result,
+    type_schema,
+    verdict,
 )
 
 from bench import auth, scrub
@@ -45,6 +56,25 @@ from bench.config import Config
 from bench.engines.chdb_iceberg import DB, ChdbIceberg
 
 SEED = [(1, 10), (2, 20), (3, 30)]
+
+# The VALUES literal chDB writes for each TYPE_EXPECTED case, into a table pyiceberg made.
+TYPES = {
+    "decimal": "12.34",
+    "date": "'2026-01-02'",
+    "timestamp": "'2026-01-02 03:04:05.123456'",
+    "timestamptz": "'2026-01-02 03:04:05.123456'",
+    "uuid": "'6f1c2d3e-4b5a-4c6d-8e7f-0123456789ab'",
+    "binary": "unhex('0102')",
+    "struct": "tuple(1, 'x')",
+    "list": "[1, 2, 3]",
+    "map": "map('k', 1)",
+}
+
+
+def _transform_values(kind: str) -> str:
+    family = "temporal" if kind in TEMPORAL else kind
+    quote = "{}" if kind == "bucket" else "'{}'"
+    return ", ".join(f"({i}, {quote.format(v)})" for i, v in TRANSFORM_ROWS[family])
 
 
 def _one_line(text: object, limit: int = 700) -> str:
@@ -145,10 +175,10 @@ class ChdbCapability:
         self.created.append(table)
         return table
 
-    def _py_create(self, what: str, partitioned: bool = False) -> str:
+    def _py_create(self, what: str, partitioned: bool = False, schema=None, spec=None) -> str:
         """The same table made by pyiceberg, for when chDB cannot create one itself."""
         table = self.name(what)
-        schema, spec = iceberg_schema(), None
+        schema = schema or iceberg_schema()
         if partitioned:
             from pyiceberg.partitioning import PartitionField, PartitionSpec
             from pyiceberg.schema import Schema
@@ -214,14 +244,50 @@ class ChdbCapability:
         return self._expect(table, SEED, "CTAS")
 
     def partitioned(self) -> str:
-        if not self.can_create:
-            raise Skip("no table could be created")
-        table = self._partitioned("part")
+        if self.can_create:
+            table = self._create("part", "id Int64, v Int64, p String", "PARTITION BY p")
+        else:
+            table = self._py_create("part", partitioned=True)
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (1, 10, 'a'), (2, 20, 'a'), (3, 30, 'b')")
         spec = [str(f.transform) for f in self.iceberg(table).spec().fields]
         if not spec:
             raise NoOp("PARTITION BY returned success and the spec is empty")
-        files = len(list(self.iceberg(table).scan().plan_files()))
-        return f"spec {spec}; 3 rows over 2 partitions wrote {files} data file(s)"
+        files = list(self.iceberg(table).scan().plan_files())
+        parts = {str(task.file.partition) for task in files}
+        made = "; table made by pyiceberg" if table in self.by_pyiceberg else ""
+        return f"spec {spec}; 3 rows over {len(parts)} partition(s), {len(files)} file(s){made}"
+
+    def _transform(self, kind: str) -> tuple[str, str, str]:
+        schema, spec, parts = transform_case(kind)
+        table = self._py_create(f"tr_{kind}", schema=schema, spec=spec)
+        try:
+            self.sql(f"INSERT INTO {self.t(table)} VALUES {_transform_values(kind)}")
+        except Refused as exc:
+            return kind, REFUSED, str(exc)
+        return partition_result(self.iceberg(table), kind, parts)
+
+    def partition_bucket(self) -> str:
+        return verdict([self._transform("bucket")])
+
+    def partition_truncate(self) -> str:
+        return verdict([self._transform("truncate")])
+
+    def partition_temporal(self) -> str:
+        return verdict([self._transform(kind) for kind in TEMPORAL])
+
+    def _typed(self, name: str) -> tuple[str, str, str]:
+        table = self._py_create(f"type_{name}", schema=type_schema(name))
+        try:
+            self.sql(f"INSERT INTO {self.t(table)} VALUES (1, {TYPES[name]})")
+        except Refused as exc:
+            return name, REFUSED, str(exc)
+        return type_result(self.iceberg(table), name)
+
+    def types_scalar(self) -> str:
+        return verdict([self._typed(name) for name in SCALAR_TYPES])
+
+    def types_nested(self) -> str:
+        return verdict([self._typed(name) for name in NESTED_TYPES])
 
     def sorted_at_create(self) -> str:
         if not self.can_create:
@@ -317,6 +383,12 @@ class ChdbCapability:
         if "v2" not in names:
             raise NoOp(f"returned success and the schema is still {names}")
         return self._expect(table, SEED, "renamed, data kept", ("id", "v2"))
+
+    def type_promotion(self) -> str:
+        table = self._py_create("promote", schema=promotion_schema())
+        self.sql(f"INSERT INTO {self.t(table)} VALUES (1, 7)")
+        self.sql(f"ALTER TABLE {self.t(table)} MODIFY COLUMN c Nullable(Int64)")
+        return promotion_check(self.iceberg(table)) + "; table made by pyiceberg"
 
     def partition_evolution(self) -> str:
         table = self._fresh("specevo")
@@ -477,6 +549,11 @@ PROBES = [
     ("create", "CREATE TABLE ... AS SELECT", "ctas"),
     ("create", "PARTITION BY p, then INSERT", "partitioned"),
     ("create", "ORDER BY at create (sort order)", "sorted_at_create"),
+    ("create", "INSERT into bucket(4, id) partitions", "partition_bucket"),
+    ("create", "INSERT into truncate(2, x) partitions", "partition_truncate"),
+    ("create", "INSERT into year / month / day / hour partitions", "partition_temporal"),
+    ("create", "types: decimal, date, timestamp, timestamptz, uuid, binary", "types_scalar"),
+    ("create", "nested types: struct, list, map", "types_nested"),
     ("write", "INSERT INTO ... VALUES", "insert_into"),
     ("write", "INSERT INTO ... SELECT", "insert_select"),
     ("write", "INSERT OVERWRITE", "insert_overwrite"),
@@ -490,6 +567,7 @@ PROBES = [
     ("schema", "ALTER TABLE ADD COLUMN", "add_column"),
     ("schema", "ALTER TABLE DROP COLUMN", "drop_column"),
     ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
+    ("schema", "MODIFY COLUMN c Int64 (int -> long)", "type_promotion"),
     ("schema", "ALTER TABLE ADD PARTITION FIELD (partition evolution)", "partition_evolution"),
     ("schema", "ALTER TABLE SET TBLPROPERTIES", "set_property"),
     ("schema", "ALTER TABLE MODIFY ORDER BY (sort order evolution)", "sort_order_evolution"),

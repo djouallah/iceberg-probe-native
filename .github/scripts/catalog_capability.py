@@ -290,6 +290,245 @@ def raw_schema(first_field_id: int) -> dict:
 
 
 # --------------------------------------------------------------------------------------------
+# partition transforms, column types, type promotion: the same cases for every engine
+# --------------------------------------------------------------------------------------------
+
+TEMPORAL = ("year", "month", "day", "hour")
+# Rows every engine writes for each transform: (id, value). The two timestamps differ in year,
+# month, day and hour, so every temporal transform splits them; truncate(2) splits ap / ba.
+TRANSFORM_ROWS = {
+    "bucket": [(i, i * 10) for i in range(1, 9)],
+    "truncate": [(1, "apple"), (2, "apricot"), (3, "banana")],
+    "temporal": [(1, "2025-01-01 10:00:00"), (2, "2026-02-02 11:00:00")],
+}
+
+SCALAR_TYPES = ("decimal", "date", "timestamp", "timestamptz", "uuid", "binary")
+NESTED_TYPES = ("struct", "list", "map")
+# What column x reads back as, normalised by `normalize`, after each engine writes its literal.
+TYPE_EXPECTED = {
+    "decimal": "12.34",
+    "date": "2026-01-02",
+    "timestamp": "2026-01-02T03:04:05.123456",
+    "timestamptz": "2026-01-02T03:04:05.123456+00:00",
+    "uuid": "6f1c2d3e-4b5a-4c6d-8e7f-0123456789ab",
+    "binary": "0102",
+    "struct": '{"a": 1, "b": "x"}',
+    "list": "[1, 2, 3]",
+    "map": '{"k": 1}',
+}
+
+
+def _family(kind: str) -> str:
+    return "temporal" if kind in TEMPORAL else kind
+
+
+def transform_case(kind: str):
+    """(schema, spec, expected partition count) for one transform: bucket, truncate, or one of
+    TEMPORAL. Column 2 holds the value; bucket partitions column 1, the others column 2."""
+    from pyiceberg.partitioning import PartitionField, PartitionSpec
+    from pyiceberg.schema import Schema
+    from pyiceberg.transforms import (
+        BucketTransform,
+        DayTransform,
+        HourTransform,
+        MonthTransform,
+        TruncateTransform,
+        YearTransform,
+    )
+    from pyiceberg.types import LongType, NestedField, StringType, TimestampType
+
+    value_type = {"bucket": LongType(), "truncate": StringType(), "temporal": TimestampType()}
+    schema = Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "x", value_type[_family(kind)], required=False),
+    )
+    transform = {
+        "bucket": BucketTransform(4),
+        "truncate": TruncateTransform(2),
+        "year": YearTransform(),
+        "month": MonthTransform(),
+        "day": DayTransform(),
+        "hour": HourTransform(),
+    }[kind]
+    source = 1 if kind == "bucket" else 2
+    spec = PartitionSpec(PartitionField(source, 1000, transform, f"{kind}_p"))
+    rows_ = TRANSFORM_ROWS[_family(kind)]
+    if kind == "bucket":
+        bucket = BucketTransform(4).transform(LongType())
+        parts = len({bucket(i) for i, _ in rows_})
+    else:
+        parts = 2
+    return schema, spec, parts
+
+
+def transform_arrow(kind: str, schema):
+    """TRANSFORM_ROWS for `kind` as an Arrow table matching `schema`, for pyiceberg's append."""
+    import datetime as dt
+
+    import pyarrow as pa
+    from pyiceberg.io.pyarrow import schema_to_pyarrow
+
+    rows_ = TRANSFORM_ROWS[_family(kind)]
+    if kind in TEMPORAL:
+        rows_ = [(i, dt.datetime.fromisoformat(v)) for i, v in rows_]
+    return pa.Table.from_pylist(
+        [{"id": i, "x": v} for i, v in rows_], schema=schema_to_pyarrow(schema)
+    )
+
+
+def type_schema(name: str):
+    """(id long, x <the type>) for one TYPE_EXPECTED case."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import (
+        BinaryType,
+        DateType,
+        DecimalType,
+        ListType,
+        LongType,
+        MapType,
+        NestedField,
+        StringType,
+        StructType,
+        TimestampType,
+        TimestamptzType,
+        UUIDType,
+    )
+
+    x = {
+        "decimal": DecimalType(10, 2),
+        "date": DateType(),
+        "timestamp": TimestampType(),
+        "timestamptz": TimestamptzType(),
+        "uuid": UUIDType(),
+        "binary": BinaryType(),
+        "struct": StructType(
+            NestedField(3, "a", LongType(), required=False),
+            NestedField(4, "b", StringType(), required=False),
+        ),
+        "list": ListType(element_id=3, element_type=LongType(), element_required=False),
+        "map": MapType(
+            key_id=3, key_type=StringType(), value_id=4, value_type=LongType(), value_required=False
+        ),
+    }[name]
+    return Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "x", x, required=False),
+    )
+
+
+def type_arrow(name: str, schema):
+    """The one row (1, <TYPE_EXPECTED value>) as an Arrow table matching `schema`."""
+    import datetime as dt
+    import decimal
+    import uuid
+
+    import pyarrow as pa
+    from pyiceberg.io.pyarrow import schema_to_pyarrow
+
+    ts = dt.datetime(2026, 1, 2, 3, 4, 5, 123456)
+    value = {
+        "decimal": decimal.Decimal("12.34"),
+        "date": dt.date(2026, 1, 2),
+        "timestamp": ts,
+        "timestamptz": ts.replace(tzinfo=dt.UTC),
+        "uuid": uuid.UUID(TYPE_EXPECTED["uuid"]).bytes,
+        "binary": b"\x01\x02",
+        "struct": {"a": 1, "b": "x"},
+        "list": [1, 2, 3],
+        "map": [("k", 1)],
+    }[name]
+    return pa.Table.from_pylist([{"id": 1, "x": value}], schema=schema_to_pyarrow(schema))
+
+
+def normalize(name: str, value) -> str:
+    """One read-back value as the string TYPE_EXPECTED holds for it."""
+    import datetime as dt
+    import uuid
+
+    if value is None:
+        return "null"
+    if name == "uuid":
+        if isinstance(value, bytes | bytearray):
+            value = uuid.UUID(bytes=bytes(value))
+        return str(value)
+    if name == "binary":
+        return bytes(value).hex()
+    if name == "timestamptz" and isinstance(value, dt.datetime):
+        return value.astimezone(dt.UTC).isoformat()
+    if isinstance(value, dt.date | dt.datetime):
+        return value.isoformat()
+    if name == "map" and isinstance(value, list):
+        value = dict(value)
+    if name in NESTED_TYPES:
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
+
+
+def type_result(tbl, name: str) -> tuple[str, str, str]:
+    """Column x of the table's one row, read through pyiceberg, against TYPE_EXPECTED."""
+    try:
+        found = tbl.scan(selected_fields=("x",)).to_arrow().to_pylist()
+    except Exception as exc:  # noqa: BLE001 - the read-back failing is the answer
+        return name, NOOP, f"written; pyiceberg cannot read it: {scrub.scrub_exc(exc, 200)}"
+    got = normalize(name, found[0]["x"]) if len(found) == 1 else f"{len(found)} rows"
+    if got != TYPE_EXPECTED[name]:
+        return name, NOOP, f"expected {TYPE_EXPECTED[name]}, reads {got}"
+    return name, SUPPORTED, got
+
+
+def partition_result(tbl, kind: str, parts: int) -> tuple[str, str, str]:
+    """The spec carries the transform and the data files split the rows into `parts`."""
+    spec = [str(f.transform) for f in tbl.spec().fields]
+    if not any(s.startswith(kind) for s in spec):
+        return kind, NOOP, f"the spec is {spec}"
+    files = list(tbl.scan().plan_files())
+    found = {str(task.file.partition) for task in files}
+    count = sum(task.file.record_count for task in files)
+    expected = len(TRANSFORM_ROWS[_family(kind)])
+    if len(found) != parts or count != expected:
+        return (
+            kind,
+            NOOP,
+            f"{len(found)} partition(s) holding {count} row(s), expected {parts} and {expected}",
+        )
+    return kind, SUPPORTED, f"{spec[0]} over {parts} partitions"
+
+
+def verdict(results: list[tuple[str, str, str]]) -> str:
+    """One probe asking several things: yes only if every one of them is."""
+    ok = [label for label, outcome, _ in results if outcome == SUPPORTED]
+    refused = [f"{label}: {d}" for label, outcome, d in results if outcome == REFUSED]
+    ignored = [f"{label}: {d}" for label, outcome, d in results if outcome == NOOP]
+    if refused:
+        raise Refused(f"works: {ok or 'none'}; refused: " + "; ".join(refused + ignored))
+    if ignored:
+        raise NoOp(f"works: {ok or 'none'}; not applied: " + "; ".join(ignored))
+    return "all of " + ", ".join(ok)
+
+
+def promotion_schema():
+    """(id long, c int), for the int -> long promotion."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import IntegerType, LongType, NestedField
+
+    return Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "c", IntegerType(), required=False),
+    )
+
+
+def promotion_check(tbl) -> str:
+    """After the promotion: c is a long, and the row written as an int still reads 7."""
+    kind = str(tbl.schema().find_field("c").field_type)
+    if kind != "long":
+        raise NoOp(f"returned success and c is still {kind}")
+    found = tbl.scan(selected_fields=("c",)).to_arrow().to_pylist()
+    if [r["c"] for r in found] != [7]:
+        raise NoOp(f"c is long, and the old row reads {found}")
+    return "c is long, and the row written as int reads 7"
+
+
+# --------------------------------------------------------------------------------------------
 # the probes
 # --------------------------------------------------------------------------------------------
 
@@ -479,6 +718,51 @@ class Capability:
         table = self.create("part", partition_spec=spec)
         table.append(rows([(1, 10), (2, 20)]))
         return "an identity-partitioned table is created and written"
+
+    def _transform(self, kind: str) -> tuple[str, str, str]:
+        schema, spec, parts = transform_case(kind)
+        try:
+            table = self.create(f"tr_{kind}", schema=schema, partition_spec=spec)
+            table.append(transform_arrow(kind, schema))
+        except Exception as exc:  # noqa: BLE001 - each transform answers for itself
+            return kind, REFUSED, scrub.scrub_exc(exc, 300)
+        return partition_result(table.refresh(), kind, parts)
+
+    def partition_bucket(self) -> str:
+        return verdict([self._transform("bucket")])
+
+    def partition_truncate(self) -> str:
+        return verdict([self._transform("truncate")])
+
+    def partition_temporal(self) -> str:
+        return verdict([self._transform(kind) for kind in TEMPORAL])
+
+    def _typed(self, name: str) -> tuple[str, str, str]:
+        schema = type_schema(name)
+        try:
+            table = self.create(f"type_{name}", schema=schema)
+            table.append(type_arrow(name, schema))
+        except Exception as exc:  # noqa: BLE001 - each type answers for itself
+            return name, REFUSED, scrub.scrub_exc(exc, 300)
+        return type_result(table.refresh(), name)
+
+    def types_scalar(self) -> str:
+        return verdict([self._typed(name) for name in SCALAR_TYPES])
+
+    def types_nested(self) -> str:
+        return verdict([self._typed(name) for name in NESTED_TYPES])
+
+    def type_promotion(self) -> str:
+        import pyarrow as pa
+        from pyiceberg.io.pyarrow import schema_to_pyarrow
+        from pyiceberg.types import LongType
+
+        schema = promotion_schema()
+        table = self.create("promote", schema=schema)
+        table.append(pa.Table.from_pylist([{"id": 1, "c": 7}], schema=schema_to_pyarrow(schema)))
+        with table.update_schema() as update:
+            update.update_column("c", LongType())
+        return promotion_check(table.refresh())
 
     def create_sorted(self) -> str:
         from pyiceberg.table.sorting import SortField, SortOrder
@@ -860,6 +1144,11 @@ PROBES = [
     ("create", "createTable with stage-create, is it honoured", "create_staged"),
     ("create", "createTable partitioned, then write it", "create_partitioned"),
     ("create", "createTable with a sort order", "create_sorted"),
+    ("create", "partitioned by bucket(4, id), then append", "partition_bucket"),
+    ("create", "partitioned by truncate(2, x), then append", "partition_truncate"),
+    ("create", "partitioned by year / month / day / hour, then append", "partition_temporal"),
+    ("create", "types: decimal, date, timestamp, timestamptz, uuid, binary", "types_scalar"),
+    ("create", "nested types: struct, list, map", "types_nested"),
     ("write", "append, one snapshot per commit", "append"),
     ("write", "two snapshots in ONE commit", "two_snapshots_one_commit"),
     ("write", "overwrite the whole table", "overwrite_whole"),
@@ -871,6 +1160,7 @@ PROBES = [
     ("commit", "add a column", "add_column"),
     ("commit", "drop a column", "drop_column"),
     ("commit", "rename a column", "rename_column"),
+    ("commit", "type promotion, int -> long", "type_promotion"),
     ("commit", "partition evolution (add a bucket field)", "partition_evolution"),
     ("commit", "sort order evolution, update_sort_order()", "sort_order_evolution"),
     ("commit", "set a table property", "set_property"),

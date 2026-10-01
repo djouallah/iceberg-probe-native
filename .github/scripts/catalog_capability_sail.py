@@ -25,14 +25,23 @@ import sys
 from catalog_capability import (
     BROKEN,
     NAMESPACE,
+    NESTED_TYPES,
     NOOP,
     REFUSED,
+    SCALAR_TYPES,
     SKIPPED,
     SUPPORTED,
+    TEMPORAL,
+    TRANSFORM_ROWS,
     NoOp,
     Refused,
     Report,
     Skip,
+    partition_result,
+    promotion_check,
+    transform_case,
+    type_result,
+    verdict,
 )
 
 from bench import auth, scrub
@@ -55,6 +64,42 @@ def _one_line(text: object, limit: int = 700) -> str:
 
 def _say(text: object) -> None:
     print(scrub.scrub(text), flush=True)
+
+
+# Column type and literal for each TYPE_EXPECTED case. Spark SQL has no UUID type; the create
+# carries `UUID` anyway, so the answer is the parser's own.
+TYPES = {
+    "decimal": ("DECIMAL(10, 2)", "CAST('12.34' AS DECIMAL(10, 2))"),
+    "date": ("DATE", "DATE '2026-01-02'"),
+    "timestamp": ("TIMESTAMP_NTZ", "TIMESTAMP_NTZ '2026-01-02 03:04:05.123456'"),
+    "timestamptz": ("TIMESTAMP", "TIMESTAMP '2026-01-02 03:04:05.123456'"),
+    "uuid": ("UUID", "'6f1c2d3e-4b5a-4c6d-8e7f-0123456789ab'"),
+    "binary": ("BINARY", "X'0102'"),
+    "struct": ("STRUCT<a: BIGINT, b: STRING>", "named_struct('a', CAST(1 AS BIGINT), 'b', 'x')"),
+    "list": ("ARRAY<BIGINT>", "CAST(array(1, 2, 3) AS ARRAY<BIGINT>)"),
+    "map": ("MAP<STRING, BIGINT>", "map('k', CAST(1 AS BIGINT))"),
+}
+
+
+def _transform_sql(kind: str) -> tuple[str, str, str]:
+    """(columns, partition transform, INSERT's SELECT) for one transform_case."""
+    if kind == "bucket":
+        columns, part, cast = "id BIGINT, x BIGINT", "bucket(4, id)", "CAST(x AS BIGINT)"
+        values = [f"({i}, {v})" for i, v in TRANSFORM_ROWS["bucket"]]
+    elif kind == "truncate":
+        columns, part, cast = "id BIGINT, x STRING", "truncate(2, x)", "x"
+        values = [f"({i}, '{v}')" for i, v in TRANSFORM_ROWS["truncate"]]
+    else:
+        columns, part, cast = (
+            "id BIGINT, x TIMESTAMP_NTZ",
+            f"{kind}s(x)",
+            "CAST(x AS TIMESTAMP_NTZ)",
+        )
+        values = [f"({i}, '{v}')" for i, v in TRANSFORM_ROWS["temporal"]]
+    select = (
+        f"SELECT CAST(id AS BIGINT) AS id, {cast} AS x FROM VALUES {', '.join(values)} AS s(id, x)"
+    )
+    return columns, part, select
 
 
 def _select(pairs) -> str:
@@ -224,6 +269,50 @@ class SailCapability:
         files = len(list(self.iceberg(table).scan().plan_files()))
         return f"spec {spec}; 3 rows over 2 partitions wrote {files} data file(s)"
 
+    def _transform(self, kind: str) -> tuple[str, str, str]:
+        columns, part, select = _transform_sql(kind)
+        _, _, parts = transform_case(kind)
+        try:
+            table = self._create(f"tr_{kind}", columns, f"PARTITIONED BY ({part})")
+            self.sql(f"INSERT INTO {self.t(table)} {select}")
+        except Refused as exc:
+            return kind, REFUSED, str(exc)
+        return partition_result(self.iceberg(table), kind, parts)
+
+    def _transforms(self, kinds) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        return verdict([self._transform(kind) for kind in kinds])
+
+    def partition_bucket(self) -> str:
+        return self._transforms(["bucket"])
+
+    def partition_truncate(self) -> str:
+        return self._transforms(["truncate"])
+
+    def partition_temporal(self) -> str:
+        return self._transforms(TEMPORAL)
+
+    def _typed(self, name: str) -> tuple[str, str, str]:
+        column, literal = TYPES[name]
+        try:
+            table = self._create(f"type_{name}", f"id BIGINT, x {column}")
+            self.sql(f"INSERT INTO {self.t(table)} SELECT CAST(1 AS BIGINT) AS id, {literal} AS x")
+        except Refused as exc:
+            return name, REFUSED, str(exc)
+        return type_result(self.iceberg(table), name)
+
+    def _types(self, names) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        return verdict([self._typed(name) for name in names])
+
+    def types_scalar(self) -> str:
+        return self._types(SCALAR_TYPES)
+
+    def types_nested(self) -> str:
+        return self._types(NESTED_TYPES)
+
     def sort_order(self) -> str:
         table = self._fresh("sorted")
         self.sql(f"ALTER TABLE {self.t(table)} WRITE ORDERED BY id")
@@ -335,6 +424,14 @@ class SailCapability:
         if "v2" not in names:
             raise NoOp(f"returned success and the schema is still {names}")
         return self._expect(table, SEED, "renamed, data kept", ("id", "v2"))
+
+    def type_promotion(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._create("promote", "id BIGINT, c INT")
+        self.sql(f"INSERT INTO {self.t(table)} SELECT CAST(1 AS BIGINT) AS id, CAST(7 AS INT) AS c")
+        self.sql(f"ALTER TABLE {self.t(table)} ALTER COLUMN c TYPE BIGINT")
+        return promotion_check(self.iceberg(table))
 
     def partition_evolution(self) -> str:
         table = self._fresh("specevo")
@@ -515,6 +612,11 @@ PROBES = [
     ("create", "CREATE OR REPLACE TABLE ... AS SELECT, existing table", "create_or_replace"),
     ("create", "PARTITIONED BY (p), then INSERT", "partitioned"),
     ("create", "ALTER TABLE ... WRITE ORDERED BY (sort order)", "sort_order"),
+    ("create", "PARTITIONED BY (bucket(4, id)), then INSERT", "partition_bucket"),
+    ("create", "PARTITIONED BY (truncate(2, x)), then INSERT", "partition_truncate"),
+    ("create", "PARTITIONED BY years / months / days / hours, then INSERT", "partition_temporal"),
+    ("create", "types: decimal, date, timestamp, timestamptz, uuid, binary", "types_scalar"),
+    ("create", "nested types: struct, list, map", "types_nested"),
     ("write", "INSERT INTO", "insert_into"),
     ("write", "INSERT OVERWRITE", "insert_overwrite"),
     ("write", "INSERT OVERWRITE ... PARTITION (p = 'a')", "overwrite_partition"),
@@ -528,6 +630,7 @@ PROBES = [
     ("schema", "ALTER TABLE ADD COLUMN", "add_column"),
     ("schema", "ALTER TABLE DROP COLUMN", "drop_column"),
     ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
+    ("schema", "ALTER COLUMN c TYPE BIGINT (int -> long)", "type_promotion"),
     ("schema", "ALTER TABLE ADD PARTITION FIELD (partition evolution)", "partition_evolution"),
     ("schema", "ALTER TABLE SET TBLPROPERTIES", "set_property"),
     ("read", "time travel, VERSION AS OF", "time_travel"),

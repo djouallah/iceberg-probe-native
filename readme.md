@@ -25,13 +25,19 @@ operation · `—` not probed
 | INSERT OVERWRITE, whole table | yes | yes ⁵ | yes | na |
 | INSERT OVERWRITE, one partition / by filter | yes | yes ⁵ | na | na |
 | TRUNCATE | na | yes ⁶ | na | na |
-| Partitioned table | yes | yes | yes | — |
+| Partitioned table | yes | yes | yes | yes |
+| Partition transform: bucket | yes | yes | yes | yes |
+| Partition transform: truncate | yes | yes | yes | yes |
+| Partition transforms: year / month / day / hour | yes | yes | yes | yes |
+| Types: decimal, date, timestamp, timestamptz, uuid, binary | yes | yes | yes ¹⁴ | yes ¹⁵ |
+| Nested types: struct, list, map | yes | yes | yes | yes |
 | Add column | yes | yes | na | yes |
 | Drop column | yes | yes | na | yes |
 | Rename column | yes | yes | na | yes |
+| Type promotion (int → long) | yes | yes | na | yes |
 | Partition evolution | yes | yes | na | na |
 | Set table property | yes | yes | na | na |
-| Sort order at create | yes | yes | na | — |
+| Sort order at create | yes | yes | na | no ⁸ |
 | Sort order evolution | yes | yes | na | na |
 | Time travel | yes | yes | yes | yes |
 | Metadata tables | yes | yes | na | yes |
@@ -92,8 +98,12 @@ The catalog itself refuses or ignores these, so no engine can do them.
 12. chDB: `expire_snapshots is not supported for Iceberg tables backed by a transactional
     catalog`.
 13. Python, with pyarrow writing the parquet files. iceberg-rust comes in only through the optional
-    `pyiceberg-core` extra, for partition transforms (bucket, year, month, day, hour) and the
-    DataFusion table provider; these readings ran without it.
+    `pyiceberg-core` extra, which computes the bucket and year / month / day / hour partition
+    values; the partition-transform rows were read with it installed.
+14. All but `uuid`: Spark SQL has no UUID type.
+15. A `timestamp` (no zone) is written shifted by chDB's session time zone: `03:04` written on a
+    UTC+10 machine reads back as `17:04` the day before. With `SET session_timezone = 'UTC'` it is
+    written as given.
 
 ## Other readings
 
@@ -113,6 +123,9 @@ Read on a laptop with `az login` on 2026-09-30: pyiceberg 0.12.0, DuckDB 2.0.0.d
 Sail 0.7.2, and chDB 4.4.0 under WSL, as chDB has no Windows build. chDB 4.4.0 embeds ClickHouse
 26.9.2.1, the current stable line; ClickHouse master has the same Iceberg `EXECUTE` commands
 (`expire_snapshots`, `remove_orphan_files`) and the same drop.
+
+The partition-transform, type and type-promotion rows were read on 2026-10-01: pyiceberg (with
+`pyiceberg-core` 0.10.1), Sail and chDB under WSL, DuckDB with the CLI v2.1.0-alpha43762.
 
 ```bash
 ONELAKE_HOST=<host> FABRIC_WORKSPACE_ID=... FABRIC_LAKEHOUSE_ID=... PYTHONPATH=. \
