@@ -7,13 +7,11 @@ extension's Iceberg write support moves. This script sends it the Iceberg write 
 one statement at a time and checks what each statement DID.
 
 A `no` carrying the catalog's REST error is the catalog's; any other `no` is DuckDB's. Where
-DuckDB has no
-statement for an operation at all, the probe asks what the parser says rather than skipping, so
-the `no` carries DuckDB's own words.
+DuckDB has no statement for an operation at all, the probe asks what the parser says rather than
+skipping, so the `no` carries DuckDB's own words.
 
-THE ATTACH is bench/engines/duckdb_iceberg.attach: the curl
-transport, an access-token storage secret, ACCESS_DELEGATION_MODE 'none', and the two OneLake
-write flags. DuckDB has no per-table location on CREATE, so every table here takes the location
+THE ATTACH is bench/engines/duckdb_iceberg.attach: the curl transport, an access-token storage
+secret, ACCESS_DELEGATION_MODE 'none', and the two OneLake write flags. DuckDB has no per-table location on CREATE, so every table here takes the location
 the catalog assigns.
 
 EVERY PROBE CHECKS ITS EFFECT, twice where it is cheap: read back in DuckDB, and again through

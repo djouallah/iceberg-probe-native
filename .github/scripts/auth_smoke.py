@@ -1,8 +1,8 @@
 """Prove the credential chain in about a minute, before anything expensive runs.
 
 THIS SCRIPT EXISTS TO MAKE FAILURES CHEAP AND LEGIBLE. Five separate things have to be right
-before a benchmark job can do anything, they are configured in five different places, and they
-all fail with a 401 or a 403 that looks the same from inside a 25-minute run:
+before a capability run can do anything, they are configured in five different places, and they
+all fail with a 401 or a 403 that looks the same from inside a long run:
 
   1. the federated credential's SUBJECT matches this repo and ref
   2. its AUDIENCE is api://AzureADTokenExchange
@@ -13,9 +13,9 @@ all fail with a 401 or a 403 that looks the same from inside a 25-minute run:
 Each probe below isolates one of them, so the log says which. It exits non-zero on the first
 failure, because there is no point testing a write when the token did not mint.
 
-THE WRITE PROBE IS THE POINT. Probes 1-3 only prove the token is good for READING. `prepare` has
-to CREATE a namespace, CREATE tables and COMMIT snapshots, and a Viewer role gets all the way to
-probe 3 and then fails there. Probe 4 finds that out in two minutes instead of twenty-five.
+THE WRITE PROBE IS THE POINT. Probes 1-3 only prove the token is good for READING. The capability
+probes CREATE namespaces and tables and COMMIT snapshots, and a Viewer role gets all the way to
+probe 3 and then fails there. Probe 4 finds that out in a minute.
 
 It creates `_bench_probe` and leaves it behind. Deleting requires more permission than creating,
 and a probe that needs elevated rights to clean up after itself is worse than a stray empty
@@ -100,8 +100,8 @@ def main() -> int:
         # AND THE FILE PATH, which is a SEPARATE failure. Creating a table is pure REST; reading
         # or writing its data goes through a FileIO that pyiceberg picks per scheme, and for
         # abfss:// that is FsspecFileIO, which imports `adlfs` lazily. A missing adlfs does not
-        # surface here -- it surfaces inside add_files, after the whole dataset has been
-        # generated and uploaded. Touching it now costs one HEAD request.
+        # surface here -- it surfaces at the first data write. Touching it now costs one
+        # HEAD request.
         table.io.new_input(f"{location}/_probe_does_not_exist.parquet").exists()
         return f"created {name}, and its FileIO resolves -- REST commit and blob access both work"
 
@@ -110,14 +110,14 @@ def main() -> int:
 
         PROBE 4 CANNOT SEE THIS FAILURE. It goes through pyiceberg's FileIO, which is adlfs --
         a completely different HTTP stack from DuckDB's azure extension. adlfs was perfectly
-        happy while DuckDB could not read a single byte, so every probe passed and the benchmark
-        then failed 44 times out of 44 on:
+        happy while DuckDB could not read a single byte, so every probe passed and every DuckDB
+        read then failed on:
 
             IOException: AzureStorageFileSystem could not open file: 'abfss://.../Tables/...'
 
         The cause is the azure extension's HTTP transport, not the credential -- see
         config.azure_transport(). This probe exercises exactly that path, so the failure costs 90
-        seconds instead of a full generate-and-benchmark cycle.
+        seconds instead of a full DuckDB capability run.
 
         It also reports WHICH transports work, because that is the fact worth knowing: if DuckDB
         ever fixes its default, this log says so.
@@ -186,7 +186,7 @@ def main() -> int:
             print(f"\nstopped at probe {number}")
             return 1
 
-    print("\nall probes passed -- this repo can generate data and run the benchmark")
+    print("\nall probes passed -- the capability probes can run")
     return 0
 
 

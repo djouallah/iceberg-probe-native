@@ -4,10 +4,10 @@ Sail speaks Spark SQL but its Iceberg support is its own Rust implementation, so
 is an independent witness: a `no` it shares with pyiceberg and DuckDB is very likely the
 catalog's.
 
-THE SESSION IS THE BENCHMARKS' (bench.engines.lakesail_iceberg): an in-process Spark
+THE SESSION IS bench.engines.lakesail_iceberg's: an in-process Spark
 Connect server, the OneLake catalog in SAIL_CATALOG__LIST, and storage signed with the engine's
 own token in AZURE_STORAGE_TOKEN -- Sail logs that it does not implement vended credentials. The
-session time zone is set to UTC, the ETL engine's fix for Sail's timestamptz writer.
+session time zone is set to UTC, the known fix for Sail's timestamptz writer.
 
 EVERY PROBE CHECKS ITS EFFECT through pyiceberg, which reads what the CATALOG now says rather than
 what Sail cached. Accepted with no effect is a no-op, not a yes. Every error Sail raises is a `no`

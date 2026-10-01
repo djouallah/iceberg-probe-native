@@ -2,8 +2,8 @@ name: auth smoke
 
 # RUN THIS FIRST, and run it whenever anything about the credential changes.
 #
-# Five separate settings, in five different places, all have to be right before a benchmark can do
-# anything -- and from inside a 25-minute run they all look like the same 401. This job isolates
+# Five separate settings, in five different places, all have to be right before a capability run can
+# do anything -- and from inside a long run they all look like the same 401. This job isolates
 # each one and takes about a minute. See .github/scripts/auth_smoke.py for what each probe proves.
 #
 # It creates a `_bench_probe` namespace and leaves it behind: deleting requires more permission
@@ -24,8 +24,8 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTHONUNBUFFERED: "1"
-      # Identical to the bench job, so probe 5 exercises the transport the benchmark will
-      # actually use. Testing a different one would make the probe worthless.
+      # The transport DuckDB needs on a Linux runner (see bench/config.azure_transport), so
+      # probe 5 exercises the one the DuckDB probe uses.
       AZURE_TRANSPORT_OPTION_TYPE: curl
       CURL_CA_INFO: /etc/ssl/certs/ca-certificates.crt
       FABRIC_WORKSPACE_ID: ${{ secrets.FABRIC_WORKSPACE_ID }}
@@ -43,8 +43,7 @@ jobs:
             requirements/duckdb_iceberg.txt
       # catalog.txt for probes 1-4. duckdb_iceberg.txt for probe 5, which reads a real parquet
       # through DuckDB -- installing the ENGINE's own file rather than putting duckdb in
-      # catalog.txt keeps the catalog-write environment engine-neutral, and means the probe
-      # exercises exactly the environment the bench job will use.
+      # catalog.txt keeps the catalog-write environment engine-neutral.
       - run: pip install -r requirements/catalog.txt -r requirements/duckdb_iceberg.txt
       - uses: azure/login@v3
         with:

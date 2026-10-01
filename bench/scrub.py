@@ -64,7 +64,7 @@ def scrub_exc(exc: BaseException, limit: int = 2000) -> str:
     """A scrubbed, length-capped one-string rendering of an exception, safe to commit to git.
 
     Deliberately NOT the full traceback: the frames carry local variables in some formatters, the
-    attach SQL among them. Type and message are what a benchmark result needs.
+    attach SQL among them. Type and message are what a probe's detail needs.
     """
     text = scrub(f"{type(exc).__name__}: {exc}")
     return text if len(text) <= limit else text[: limit - 1] + "…"

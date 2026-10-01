@@ -1,60 +1,44 @@
 """What the OneLake Iceberg REST catalog supports today, asked through pyiceberg.
 
-THE READING THAT COMES BEFORE ANY WRITE BENCHMARK. The endpoint is a private preview under
-active development, with no published documentation, so what it supports is established by
-sending the request and reading the answer. This script sends them, one per probe, and prints
-what came back. A `no` is as useful as a `yes` and is quoted in the server's own words.
+The endpoint is a private preview with no published documentation, so what it supports is
+established by sending the request and reading the answer. This script sends them, one per probe,
+and prints what came back. A `no` is as useful as a `yes` and is quoted in the server's own words.
 
 EVERYTHING HERE IS A READING TAKEN ON A DATE, not a property of the product. The surface is
-expected to move, so the workflow is the source of truth and the page it feeds (catalog.md)
-carries the run id it came from.
+expected to move; readme.md carries the readings and the date they were taken.
 
-IT IS NOT A BENCHMARK. Nothing is timed, nothing lands in results/, and a probe that comes back
-`no` does not fail the job. The only non-zero exit is a credential failure, because then nothing
-was read at all.
+IT IS NOT A BENCHMARK. Nothing is timed, and a probe that comes back `no` does not fail the job.
+The only non-zero exit is a credential failure, because then nothing was read at all.
 
-pyiceberg AND PLAIN HTTP, NO ENGINES. Every probe here is one or the other, so this runs in about
-two minutes. An answer from pyiceberg alone is a fact about pyiceberg until DuckDB or Sail
-confirms it.
+pyiceberg AND PLAIN HTTP, NO ENGINES. An answer from pyiceberg alone is a fact about pyiceberg
+until DuckDB, Sail or chDB confirms it.
 
-WHAT IT READ, run 35582405124 (2026-09-21, pyiceberg 0.12.0). 19 supported, 10 no.
+WHAT IT READ on 2026-10-01 (pyiceberg 0.12.0 with pyiceberg-core): 38 supported, 6 no.
 
-THE ENDPOINT DECLARES ITS OWN SURFACE, which is the most useful thing on this page. /v1/config
-comes back with an `endpoints` list -- the REST spec's way for a server to say what it implements
--- and this one fills it in: thirteen entries covering namespaces (list, create, load, head,
-drop), tables (list, load, head, update, drop, create), `POST /v1/{prefix}/tables/rename`, and
-per-table `credentials`. Nothing the probes got a `no` from is on that list, and nothing on the
-list came back `no`, so the list is accurate and it is where to look first: updateNamespace-
-Properties (405), registerTable (pyiceberg reads the list and declines before sending),
-multi-table transactions (405), and no metrics endpoint.
+THE ENDPOINT DECLARES ITS OWN SURFACE. /v1/config comes back with an `endpoints` list -- the REST
+spec's way for a server to say what it implements -- covering namespaces, tables,
+`POST /v1/{prefix}/tables/rename` and per-table `credentials`. It is the place to look first, but
+not the last word: rename is declared and refused (406). Not declared, and refused:
+registerTable (pyiceberg reads the list and declines before sending). Declared nowhere and
+refused when sent: updateNamespaceProperties (405), multi-table transactions (405), and
+stage-create (400 Malformed request).
 
-ONE SNAPSHOT PER COMMIT. An UpdateTableRequest carrying two `add-snapshot` updates comes back:
-
-    400 BadRequest: Only one instance of each update type is allowed per request.
-    Duplicate types: add-snapshot, set-snapshot-ref
-
-That is the shape pyiceberg builds for `overwrite` (whole-table and by filter) and for `upsert`,
-so those three are not available through pyiceberg here yet. `append` works, and so does
-`delete`, including a delete matching only part of a data file, which rewrites the remainder --
-so a row-level replace IS expressible through pyiceberg, as a delete then an append, in two
-commits rather than one.
-
-This is a statement about commit SHAPE, not about overwrite.
+TWO SNAPSHOTS IN ONE COMMIT are accepted, which is the shape pyiceberg builds for `overwrite`
+(whole table and by filter) and `upsert`, so all three work.
 
 assert-ref-snapshot-id IS ENFORCED. With `commit.retry.num-retries` set to 0 so the client could
 not refresh and re-send, a commit against a head another writer had already moved came back as
 "CommitFailedException: One or more requirements failed. The client may retry." That is the
 guarantee every lost-update defence in every client is built on, and it holds.
 
-Also accepted: create with no location (the catalog assigns one), partitioned tables written
-through, sort orders, schema evolution, table properties, tags, branches, rename, and DROP with
-purge. Declined at create: a schema whose first field id is 0, which is Spark's SparkSchemaUtil
-numbering and why the Spark probe renumbers with assignIncreasingFreshIds.
+Also accepted: create with no location (the catalog assigns one), a schema whose first field id
+is 0, partitioned tables including bucket, truncate and year / month / day / hour transforms, the
+decimal, date, timestamp, timestamptz, uuid, binary and nested types, sort orders, schema
+evolution including int -> long, partition evolution and writes after it, table properties, tags,
+branches, rollback, expire_snapshots, and DROP with purge.
 
-stage-create is a no-op: the request is accepted and the table is created immediately rather than
-staged, so loadTable finds it straight after. That matches what bench/engines/duckdb_iceberg.py
-assumes when it sets STAGE_CREATE_TABLES false. An earlier version of this probe read a 200
-on the request as support for the flag, which is why create_staged now checks the effect.
+Credential vending: GET .../credentials hands out a SAS token, but keyed by an https:// prefix
+that pyiceberg cannot match to the table's abfss:// location, so it finds no credential.
 
 It leaves the `_bench_capability` namespace behind, for the reason auth_smoke.py leaves
 `_bench_probe`: deleting needs more permission than creating. Its tables are dropped at the end
@@ -190,8 +174,7 @@ class Report:
         self.rows: list[dict] = []
         # How an unexpected exception is turned into one line. The default reads the exception
         # itself, which is right for pyiceberg, where the endpoint's message is in the text. The
-        # Spark probe passes its own, because py4j keeps the JVM message on the exception OBJECT
-        # and `str()` gives only "An error occurred while calling o93.sql."
+        # engine probes pass their own, so each engine's error reaches the log in its own words.
         self._reason = reason or (lambda exc: scrub.scrub_exc(exc, 600))
 
     def record(self, group: str, question: str, outcome: str, detail: object) -> None:
@@ -688,7 +671,7 @@ class Capability:
         return f"field ids from 1, explicit location, format-version {version}"
 
     def create_field_id_zero(self) -> str:
-        """Spark numbers top-level fields from 0; pyiceberg from 1. This is the known refusal."""
+        """Spark numbers top-level fields from 0; pyiceberg from 1. Read on 2026-10-01: accepted."""
         self.create_raw("id0", {"schema": raw_schema(0)})
         return "a schema whose first field id is 0 is accepted"
 
@@ -809,9 +792,8 @@ class Capability:
 
         order = SortOrder(SortField(source_id=1, transform=IdentityTransform()))
         self.create("sorted", sort_order=order)
-        # Read the metadata as the catalog stores it: Spark fails to load a table
-        # created with a sort order ("sortOrder is null"), which is what a default-sort-order-id
-        # naming no stored sort order looks like.
+        # Read the metadata as the catalog stores it: a default-sort-order-id naming no stored
+        # sort order is what makes a reader fail to load the table ("sortOrder is null").
         meta = self.endpoint.call("GET", f"namespaces/{NAMESPACE}/tables/{self.created[-1]}")
         meta = meta.get("metadata", {})
         default = meta.get("default-sort-order-id")
