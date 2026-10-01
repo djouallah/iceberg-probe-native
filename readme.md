@@ -22,6 +22,7 @@ operation · `—` not probed
 | CREATE OR REPLACE TABLE | na | na | na | no ⁸ |
 | UPDATE | na | yes | yes | yes ¹⁰ |
 | MERGE INTO / upsert | yes | yes | yes | na |
+| MERGE ... WHEN NOT MATCHED BY SOURCE | na | yes ¹⁶ | yes | na |
 | INSERT OVERWRITE, whole table | yes | yes ⁵ | yes | na |
 | INSERT OVERWRITE, one partition / by filter | yes | yes ⁵ | na | na |
 | TRUNCATE | na | yes ⁶ | na | na |
@@ -105,6 +106,9 @@ The catalog itself refuses or ignores these, so no engine can do them.
 15. A `timestamp` (no zone) is written shifted by chDB's session time zone: `03:04` written on a
     UTC+10 machine reads back as `17:04` the day before. With `SET session_timezone = 'UTC'` it is
     written as given.
+16. One UPDATE or DELETE action per `MERGE`: `WHEN MATCHED THEN UPDATE` together with `WHEN NOT
+    MATCHED BY SOURCE THEN DELETE` is refused (`MERGE INTO with Iceberg only supports a single
+    UPDATE/DELETE action currently`).
 ## Other readings
 
 - Optimistic concurrency holds: a commit against a stale `assert-ref-snapshot-id` is refused
@@ -124,8 +128,8 @@ Sail 0.7.2, and chDB 4.4.0 under WSL, as chDB has no Windows build. chDB 4.4.0 e
 26.9.2.1, the current stable line; ClickHouse master has the same Iceberg `EXECUTE` commands
 (`expire_snapshots`, `remove_orphan_files`) and the same drop.
 
-The partition-transform, type, type-promotion and write-after-evolution rows were read on
-2026-10-01: pyiceberg (with
+The partition-transform, type, type-promotion, write-after-evolution and `NOT MATCHED BY SOURCE`
+rows were read on 2026-10-01: pyiceberg (with
 `pyiceberg-core` 0.10.1), Sail and chDB under WSL, DuckDB with the CLI v2.1.0-alpha43762.
 
 ```bash

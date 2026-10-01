@@ -394,6 +394,16 @@ class SailCapability:
         )
         return self._expect(table, [(1, 777), (2, 20), (3, 30), (9, 90)], "MERGE INTO")
 
+    def merge_by_source(self) -> str:
+        table = self._fresh("mergesrc")
+        self.sql(
+            f"MERGE INTO {self.t(table)} t USING ({_select([(1, 10), (9, 90)])}) s "
+            f"ON t.id = s.id "
+            f"WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v) "
+            f"WHEN NOT MATCHED BY SOURCE THEN DELETE"
+        )
+        return self._expect(table, [(1, 10), (9, 90)], "MERGE ... WHEN NOT MATCHED BY SOURCE")
+
     def truncate(self) -> str:
         table = self._fresh("truncate")
         self.sql(f"TRUNCATE TABLE {self.t(table)}")
@@ -624,6 +634,7 @@ PROBES = [
     ("write", "DELETE FROM, merge-on-read table", "delete_mor"),
     ("write", "UPDATE", "update"),
     ("write", "MERGE INTO", "merge_into"),
+    ("write", "MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE", "merge_by_source"),
     ("write", "MERGE INTO, merge-on-read table", "merge_mor"),
     ("write", "MERGE ... WHEN MATCHED THEN DELETE, merge-on-read table", "merge_delete_mor"),
     ("write", "TRUNCATE TABLE", "truncate"),
