@@ -109,6 +109,67 @@ The catalog itself refuses or ignores these, so no engine can do them.
 16. One UPDATE or DELETE action per `MERGE`: `WHEN MATCHED THEN UPDATE` together with `WHEN NOT
     MATCHED BY SOURCE THEN DELETE` is refused (`MERGE INTO with Iceberg only supports a single
     UPDATE/DELETE action currently`).
+## DuckDB: isolation levels and transactions
+
+DuckDB is the only one of the four with transactions, so it gets a section of its own. Writer B
+(pyiceberg) commits between DuckDB's read and DuckDB's commit. The race is injected at the REST
+commit through a local proxy (`bench/race.py`): the proxy holds DuckDB's commit, lands B's change,
+then forwards DuckDB's, so the race is deterministic. Updates are relative, DuckDB `v + 1` and B
+`v + 100`, so a lost update would show.
+
+`refused` the commit fails and B's change stands · `retried` DuckDB commits on top of B, both
+changes kept · `skew` a row computed from the stale read is committed beside B's
+
+| DuckDB writes, B commits in between | serializable (default) | snapshot | no retries |
+|---|---|---|---|
+| INSERT, B appends | retried | retried | refused |
+| `INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, B appends | skew | skew | refused |
+| DELETE a row, B appends | refused | retried | refused |
+| UPDATE another row, B appends | refused | refused | refused |
+| MERGE on another row, B appends | refused | refused | refused |
+| DELETE a row, B deletes another row | refused | refused | refused |
+| UPDATE the row B updated | refused | refused | refused |
+| MERGE on the row B updated | refused | refused | refused |
+| Overwrite (DELETE + INSERT in one transaction), B appends | refused | retried | refused |
+
+The columns are table properties. `serializable` sets nothing, which is Iceberg's default.
+`snapshot` sets `write.delete.isolation-level`, `write.update.isolation-level` and
+`write.merge.isolation-level` to `snapshot`. `no retries` sets `commit.retry.num-retries` to `0`.
+
+- Nothing was lost in any cell.
+- Appends are never checked against what was read. An INSERT computed from a read of the table
+  commits on top of B at either isolation level. Only `commit.retry.num-retries = 0` fences it,
+  and that also refuses harmless concurrent appends.
+- The check is per commit, not per row. At `serializable`, any concurrent commit refuses a DELETE,
+  UPDATE or MERGE, even an append that touches nothing it read. DuckDB names the switch:
+  `DELETE on "<table>" conflicts with a concurrent commit (scanned snapshot ..., now at ...);
+  re-run the DELETE. Set 'write.delete.isolation-level'='snapshot' to allow re-applying deletes
+  over concurrent appends.`
+- `snapshot` relaxes DELETE only, and only when everything committed in between is an append. B
+  deleting another row still refuses it. UPDATE and MERGE are refused at every level; making them
+  retry is an open pull request,
+  [duckdb-iceberg#1474](https://github.com/duckdb/duckdb-iceberg/pull/1474).
+
+| Transaction (`BEGIN ... COMMIT`), B commits in the middle | DuckDB |
+|---|---|
+| Read twice, B appends in between | repeatable |
+| B commits after `BEGIN`, before the table's first read | read as of the first read, then pinned |
+| Read v, B changes it, UPDATE v + 1, COMMIT | refused |
+| Read the row count, B appends, INSERT the count, COMMIT | skew; refused on a `no retries` table |
+| INSERT + UPDATE + DELETE | one commit request, carrying three snapshots |
+| ROLLBACK | nothing is sent to the catalog |
+| A statement fails inside the transaction | nothing is committed, and the COMMIT that follows returns without an error |
+| Own uncommitted rows | visible inside the transaction, invisible to another connection |
+| Two tables in one transaction | refused at the second table: `Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without atomic multi-table commit support`. The catalog has no multi-table commit. |
+| Two DuckDB transactions update the same row | the second COMMIT is refused |
+
+Every connection runs `SET iceberg_use_metadata_log = false`. The default, `true` since
+[duckdb-iceberg#1395](https://github.com/duckdb/duckdb-iceberg/pull/1395), reads each table as of
+`BEGIN`. It decides that by comparing the client's clock with the catalog's commit timestamps, and
+with the catalog's clock about half a second ahead, a commit made just before a statement is
+missed, DuckDB's own included:
+[duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475).
+
 ## Other readings
 
 - Optimistic concurrency holds: a commit against a stale `assert-ref-snapshot-id` is refused
@@ -132,7 +193,12 @@ The partition-transform, type, type-promotion, write-after-evolution and `NOT MA
 rows were read on 2026-10-01: pyiceberg (with
 `pyiceberg-core` 0.10.1), Sail and chDB under WSL, DuckDB with the CLI v2.1.0-alpha43762.
 
+The DuckDB isolation and transaction readings were taken on 2026-10-01 under WSL, with DuckDB
+2.0.0.dev2609250715 and its iceberg extension `5b9ff899a1`.
+
 ```bash
 ONELAKE_HOST=<host> FABRIC_WORKSPACE_ID=... FABRIC_LAKEHOUSE_ID=... PYTHONPATH=. \
   python .github/scripts/catalog_capability.py      # or _duckdb.py, _sail.py, _chdb.py
+ONELAKE_HOST=<host> FABRIC_WORKSPACE_ID=... FABRIC_LAKEHOUSE_ID=... PYTHONPATH=. \
+  python .github/scripts/isolation_duckdb.py        # --no-race: each statement alone
 ```

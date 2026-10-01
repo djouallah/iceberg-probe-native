@@ -19,7 +19,7 @@ from bench.config import ICEBERG_ENDPOINT, Config, azure_transport
 CATALOG = "onelake"
 
 
-def attach(conn, cfg: Config, token: str) -> None:
+def attach(conn, cfg: Config, token: str, endpoint: str = ICEBERG_ENDPOINT) -> None:
     """The write-capable ATTACH on one connection: transport, storage secret, the two flags."""
     conn.sql(f"""
         SET GLOBAL azure_transport_option_type = '{azure_transport() or "default"}';
@@ -30,7 +30,7 @@ def attach(conn, cfg: Config, token: str) -> None:
 
         ATTACH OR REPLACE '{cfg.warehouse}' AS {CATALOG} (
             TYPE ICEBERG,
-            ENDPOINT '{ICEBERG_ENDPOINT}',
+            ENDPOINT '{endpoint}',
             TOKEN '{token}',
             ACCESS_DELEGATION_MODE 'none',
             STAGE_CREATE_TABLES false,
