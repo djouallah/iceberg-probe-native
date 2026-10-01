@@ -16,7 +16,7 @@ operation · `—` not probed
 | Drop table with purge | yes | yes | yes | no ⁹ |
 | Create / drop namespace | yes | yes | yes | na |
 | CREATE TABLE AS SELECT | na | yes | no ⁴ | no ⁸ |
-| CREATE OR REPLACE TABLE | na | na | na | — |
+| CREATE OR REPLACE TABLE | na | na | na | no ⁸ |
 | UPDATE | na | yes | yes | yes ¹⁰ |
 | MERGE INTO / upsert | yes | yes | yes | na |
 | INSERT OVERWRITE, whole table | yes | yes ⁵ | yes | na |
