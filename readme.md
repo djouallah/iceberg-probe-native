@@ -7,6 +7,9 @@ operation · `—` not probed
 
 | Operation | pyiceberg | DuckDB | Sail | chDB |
 |---|---|---|---|---|
+| Version | 0.12.0 | 2.0.0 alpha (dev2609250715) | 0.7.2 | 4.4.0 (ClickHouse 26.9.2.1) |
+| Language | Python | C++ | Rust | C++ |
+| Iceberg implementation | own ¹³ | own | own, on DataFusion | ClickHouse's own |
 | SQL | na | yes | yes | yes |
 | CREATE TABLE | yes | yes | yes | no ⁸ |
 | INSERT / append | yes | yes | yes | yes ⁸ |
@@ -88,6 +91,9 @@ The catalog itself refuses or ignores these, so no engine can do them.
     never rewrites data files.
 12. chDB: `expire_snapshots is not supported for Iceberg tables backed by a transactional
     catalog`.
+13. Python, with pyarrow writing the parquet files. iceberg-rust comes in only through the optional
+    `pyiceberg-core` extra, for partition transforms (bucket, year, month, day, hour) and the
+    DataFusion table provider; these readings ran without it.
 
 ## Other readings
 
