@@ -43,7 +43,6 @@ The catalog itself refuses or ignores these, so no engine can do them.
 
 | Operation | Catalog |
 |---|---|
-| format-version 3 | no-op: the table is created at v2 |
 | Staged create (`stage-create: true`) | no: `400 Malformed request` |
 | Rename table | no: `406` |
 | Drop table without purge (`purgeRequested=false`) | no: `405` |
@@ -51,6 +50,7 @@ The catalog itself refuses or ignores these, so no engine can do them.
 | Multi-table transactions | no: `405` |
 | Update namespace properties | no: `405` |
 | Server-side scan planning | no: not declared in `/v1/config` |
+| Views | no |
 
 ## Notes
 
