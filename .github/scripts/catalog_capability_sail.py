@@ -24,8 +24,6 @@ import sys
 
 from catalog_capability import (
     BROKEN,
-    EVOLVE_FIRST,
-    EVOLVE_THEN,
     NAMESPACE,
     NESTED_TYPES,
     NOOP,
@@ -39,8 +37,6 @@ from catalog_capability import (
     Refused,
     Report,
     Skip,
-    evolution_check,
-    evolve_spec,
     partition_result,
     promotion_check,
     transform_case,
@@ -429,17 +425,6 @@ class SailCapability:
             raise NoOp(f"returned success and the schema is still {names}")
         return self._expect(table, SEED, "renamed, data kept", ("id", "v2"))
 
-    def write_after_evolution(self) -> str:
-        """Sail has no statement to evolve a spec, so pyiceberg evolves it between Sail's writes."""
-        if not self.can_create:
-            raise Skip("no table could be created")
-        table = self._create("evowrite")
-        self.sql(f"INSERT INTO {self.t(table)} {_select(EVOLVE_FIRST)}")
-        evolve_spec(self.iceberg(table))
-        self.sql(f"INSERT INTO {self.t(table)} {_select(EVOLVE_THEN)}")
-        count = self.sql(f"SELECT count(*) FROM {self.t(table)}")[0][0]
-        return evolution_check(self.iceberg(table), count) + "; spec evolved by pyiceberg"
-
     def type_promotion(self) -> str:
         if not self.can_create:
             raise Skip("no table could be created")
@@ -647,7 +632,6 @@ PROBES = [
     ("schema", "ALTER TABLE RENAME COLUMN", "rename_column"),
     ("schema", "ALTER COLUMN c TYPE BIGINT (int -> long)", "type_promotion"),
     ("schema", "ALTER TABLE ADD PARTITION FIELD (partition evolution)", "partition_evolution"),
-    ("schema", "INSERT after pyiceberg evolves the spec", "write_after_evolution"),
     ("schema", "ALTER TABLE SET TBLPROPERTIES", "set_property"),
     ("read", "time travel, VERSION AS OF", "time_travel"),
     ("read", "metadata tables (t.snapshots)", "metadata_tables"),

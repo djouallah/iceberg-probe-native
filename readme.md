@@ -36,7 +36,7 @@ operation · `—` not probed
 | Rename column | yes | yes | na | yes |
 | Type promotion (int → long) | yes | yes | na | yes |
 | Partition evolution | yes | yes | na | na |
-| Write after partition evolution | yes | yes | yes ¹⁶ | yes ¹⁶ |
+| Write after partition evolution | yes | yes | na | na |
 | Set table property | yes | yes | na | na |
 | Sort order at create | yes | yes | na | no ⁸ |
 | Sort order evolution | yes | yes | na | na |
@@ -105,9 +105,6 @@ The catalog itself refuses or ignores these, so no engine can do them.
 15. A `timestamp` (no zone) is written shifted by chDB's session time zone: `03:04` written on a
     UTC+10 machine reads back as `17:04` the day before. With `SET session_timezone = 'UTC'` it is
     written as given.
-16. Sail and chDB have no statement to evolve a spec; pyiceberg added `bucket(4, id)` between the
-    engine's two writes. The data files sit on both specs and every row reads back.
-
 ## Other readings
 
 - Optimistic concurrency holds: a commit against a stale `assert-ref-snapshot-id` is refused
