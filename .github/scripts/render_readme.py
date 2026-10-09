@@ -72,6 +72,10 @@ ROWS = [
         "INSERT OVERWRITE, one partition / by filter",
         {"duckdb": ["overwrite_partition"], "sail": ["overwrite_partition"]},
     ),
+    (
+        "Several writes in one transaction",
+        {"duckdb": ["txn_two_inserts", "txn_update_insert", "txn_two_updates"]},
+    ),
     ("TRUNCATE", {"duckdb": ["truncate"], "sail": ["truncate"]}),
     ("CREATE TABLE AS SELECT", {"duckdb": ["ctas"], "sail": ["ctas"]}),
     (
