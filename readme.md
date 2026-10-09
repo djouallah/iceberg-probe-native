@@ -1,54 +1,54 @@
 # OneLake Iceberg REST catalog: what the native engines can do
 
-pyiceberg, DuckDB and Sail: engines with their own Iceberg implementation, no JVM.
+Polars, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no JVM.
 
 `yes` works · `no` refused · `no-op` accepted but not applied · `na` the engine has no such operation · `—` not probed · `?` the probe could not ask
 
-| Operation | pyiceberg | DuckDB | Sail |
+| Operation | DuckDB | Sail | chDB |
 |---|---|---|---|
-| Version | 0.12.0 | v2.0.0-alpha46057 | 0.7.2 |
-| Language | Python | C++ | Rust |
-| Iceberg implementation | own, pyarrow for the files | own | own, on DataFusion |
-| CREATE TABLE | yes | yes | yes |
+| Version | v2.0.0-alpha46057 | 0.7.2 | 4.4.0 |
+| Language | C++ | Rust | C++ |
+| Iceberg implementation | own | own, on DataFusion | ClickHouse's own |
+| CREATE TABLE | yes | yes | no ¹ |
 | INSERT / append | yes | yes | yes |
-| INSERT ... SELECT | na | yes | na |
+| INSERT ... SELECT | yes | na | yes |
 | DELETE | yes | yes | yes |
-| UPDATE | na | yes | yes |
-| MERGE INTO / upsert | no ¹ | no ² | yes |
-| MERGE with one action | na | yes | na |
-| MERGE ... WHEN NOT MATCHED BY SOURCE | na | no ³ | yes |
-| INSERT OVERWRITE, whole table | no ⁴ | no ⁵ | yes |
-| INSERT OVERWRITE, one partition / by filter | no ⁶ | no ⁷ | no ⁸ |
-| Several writes in one transaction | na | no ⁹ | na |
-| TRUNCATE | na | yes | no ¹⁰ |
-| CREATE TABLE AS SELECT | na | yes | yes |
-| CREATE OR REPLACE TABLE | na | no ¹¹ | no ¹² |
+| UPDATE | yes | yes | yes |
+| MERGE INTO / upsert | no ² | yes | no ³ |
+| MERGE with one action | yes | na | na |
+| MERGE ... WHEN NOT MATCHED BY SOURCE | no ⁴ | yes | no ⁵ |
+| INSERT OVERWRITE, whole table | no ⁶ | yes | no ⁷ |
+| INSERT OVERWRITE, one partition / by filter | no ⁸ | no ⁹ | no ¹⁰ |
+| Several writes in one transaction | no ¹¹ | na | na |
+| TRUNCATE | yes | no ¹² | no ¹³ |
+| CREATE TABLE AS SELECT | yes | yes | no ¹⁴ |
+| CREATE OR REPLACE TABLE | no ¹⁵ | no ¹⁶ | na |
 | Partitioned table | yes | yes | yes |
 | Partition transform: bucket | yes | yes | yes |
 | Partition transform: truncate | yes | yes | yes |
 | Partition transforms: year / month / day / hour | yes | yes | yes |
-| Types: decimal, date, timestamp, timestamptz, uuid, binary | yes | yes | no ¹³ |
+| Types: decimal, date, timestamp, timestamptz, uuid, binary | yes | no ¹⁷ | yes |
 | Nested types: struct, list, map | yes | yes | yes |
-| format-version 3 | no-op ¹⁴ | no-op ¹⁵ | no-op ¹⁶ |
-| Add column | yes | yes | no ¹⁷ |
-| Drop column | yes | yes | no ¹⁸ |
-| Rename column | yes | yes | no ¹⁹ |
-| Type promotion (int → long) | yes | yes | no ²⁰ |
-| Partition evolution | yes | yes | no ²¹ |
-| Write after partition evolution | yes | yes | na |
-| Set table property | yes | yes | no ²² |
-| Sort order at create | yes | yes | na |
-| Sort order evolution | yes | yes | no ²³ |
+| format-version 3 | no-op ¹⁸ | no-op ¹⁹ | na |
+| Add column | yes | no ²⁰ | yes |
+| Drop column | yes | no ²¹ | yes |
+| Rename column | yes | no ²² | yes |
+| Type promotion (int → long) | yes | no ²³ | yes |
+| Partition evolution | yes | no ²⁴ | no ²⁵ |
+| Write after partition evolution | yes | na | na |
+| Set table property | yes | no ²⁶ | no ²⁷ |
+| Sort order at create | yes | na | — |
+| Sort order evolution | yes | no ²⁸ | no ²⁹ |
 | Time travel | yes | yes | yes |
-| Metadata tables | yes | yes | no ²⁴ |
-| Compaction | na | yes | no ²⁵ |
-| Expire snapshots | yes | no ²⁶ | no ²⁷ |
-| Create branch | yes | no ²⁸ | no ²⁹ |
-| Create tag | yes | na | no ³⁰ |
-| Drop table with purge | yes | yes | yes |
-| Create / drop namespace | yes | yes | yes |
-| Credential vending | no ³¹ | yes | na |
-| A commit against a stale snapshot is refused | yes | na | na |
+| Metadata tables | yes | no ³⁰ | no ³¹ |
+| Compaction | yes | no ³² | no-op ³³ |
+| Expire snapshots | no ³⁴ | no ³⁵ | no ³⁶ |
+| Create branch | no ³⁷ | no ³⁸ | no ³⁹ |
+| Create tag | na | no ⁴⁰ | no ⁴¹ |
+| Drop table with purge | yes | yes | no ⁴² |
+| Create / drop namespace | yes | yes | na |
+| Credential vending | yes | na | na |
+| A commit against a stale snapshot is refused | na | na | na |
 
 <!-- blocked:start -->
 ## Blocked by the OneLake catalog
@@ -73,37 +73,48 @@ The catalog itself refuses or ignores these, so no engine can do them.
 
 ## Notes
 
-1. pyiceberg, MERGE INTO / upsert: upsert: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref`
+1. chDB, CREATE TABLE: CREATE TABLE: `ChdbError: Code: 79. DB::Exception: MergeTree storages require data path. (INCORRECT_FILE_NAME)`
 2. DuckDB, MERGE INTO / upsert: MERGE INTO: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-3. DuckDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-4. pyiceberg, INSERT OVERWRITE, whole table: overwrite the whole table: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref`
-5. DuckDB, INSERT OVERWRITE, whole table: overwrite: DELETE + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-6. pyiceberg, INSERT OVERWRITE, one partition / by filter: overwrite by filter: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref`
-7. DuckDB, INSERT OVERWRITE, one partition / by filter: one-partition overwrite: DELETE WHERE p + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-8. Sail, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `UnsupportedOperationException: PARTITION for write`
-9. DuckDB, Several writes in one transaction: transaction: INSERT + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + UPDATE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-10. Sail, TRUNCATE: TRUNCATE TABLE: `IllegalArgumentException: invalid argument: found TRUNCATE at 0:8 expected something else, ';', statement, or end of input`
-11. DuckDB, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`; CREATE OR REPLACE TABLE ... AS SELECT: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`
-12. Sail, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE ... AS SELECT, existing table: `AnalysisException: not supported: Replace table is not supported yet`
-13. Sail, Types: decimal, date, timestamp, timestamptz, uuid, binary: types: decimal, date, timestamp, timestamptz, uuid, binary: `works: ['decimal', 'date', 'timestamp', 'timestamptz', 'binary']; refused: uuid: IllegalArgumentException: invalid argument: found UUID at 84:88 expected data type`
-14. pyiceberg, format-version 3: createTable at format-version 3: `asked for format-version 3, the table came back at 2`
-15. DuckDB, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
-16. Sail, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
-17. Sail, Add column: ALTER TABLE ADD COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
-18. Sail, Drop column: ALTER TABLE DROP COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
-19. Sail, Rename column: ALTER TABLE RENAME COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
-20. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_promote`
-21. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
-22. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_props`
-23. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
-24. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37930015241_1_inspect"), Identifier("snapshots")]`
-25. Sail, Compaction: CALL system.rewrite_data_files (compaction): `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
-26. DuckDB, Expire snapshots: iceberg_expire_snapshots: `Catalog Error: Table Function with name iceberg_expire_snapshots does not exist! Did you mean "iceberg_snapshots"?`
-27. Sail, Expire snapshots: CALL system.expire_snapshots: `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
-28. DuckDB, Create branch: ALTER TABLE ... CREATE BRANCH: `Parser Error: syntax error at or near "CREATE" LINE 1: ... TABLE onelake."_bench_capability"."dk_37930015241_1_branch" CREATE BRANCH probe_branch ^^^^^^`
-29. Sail, Create branch: ALTER TABLE ... CREATE BRANCH: `IllegalArgumentException: invalid argument: found CREATE at 66:72 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
-30. Sail, Create tag: ALTER TABLE ... CREATE TAG: `IllegalArgumentException: invalid argument: found CREATE at 63:69 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
-31. pyiceberg, Credential vending: read and append on vended credentials alone: `pyiceberg resolved no vended credential (no adls.sas-token key in the table's FileIO); the table's metadata location is 'abfss://1c52481c-0523-4a5a-bbde-fdc932bd77c2@onelake.dfs.fabric.microsoft.com/ac303243-4441-4885-9e7d-f4f5e7af194c/Tables/_bench_capability/cap_37930015241_1_vended/metadata/0000…`
+3. chDB, MERGE INTO / upsert: MERGE INTO: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37945065317_1_merge` t USING (SELECT * FROM values('id Int64, v Int64', (1, 777), (9, 90))) s ON t.id = s.id WHEN MATCHED THEN UPD... Expected end of query. (SYNTAX_ERROR)`
+4. DuckDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
+5. chDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37945065317_1_mergesrc` t USING (SELECT * FROM values('id Int64, v Int64', (1, 10), (9, 90))) s ON t.id = s.id WHEN NOT MATCHED TH... Expected end of query. (SYNTAX_ERROR)`
+6. DuckDB, INSERT OVERWRITE, whole table: overwrite: DELETE + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
+7. chDB, INSERT OVERWRITE, whole table: INSERT OVERWRITE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37945065317_1_overwrite` SELECT * FROM values('id Int64, v Int64', (1, 100), (2, 200)). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORD…`
+8. DuckDB, INSERT OVERWRITE, one partition / by filter: one-partition overwrite: DELETE WHERE p + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
+9. Sail, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `UnsupportedOperationException: PARTITION for write`
+10. chDB, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37945065317_1_ovwpart` PARTITION (p = 'a') VALUES (9, 90). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, FETCH, …`
+11. DuckDB, Several writes in one transaction: transaction: INSERT + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + UPDATE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
+12. Sail, TRUNCATE: TRUNCATE TABLE: `IllegalArgumentException: invalid argument: found TRUNCATE at 0:8 expected something else, ';', statement, or end of input`
+13. chDB, TRUNCATE: TRUNCATE TABLE: `ChdbError: Code: 48. DB::Exception: Truncate is not supported for data lake engine. (NOT_IMPLEMENTED)`
+14. chDB, CREATE TABLE AS SELECT: CREATE TABLE ... AS SELECT: `ChdbError: Code: 79. DB::Exception: MergeTree storages require data path. (INCORRECT_FILE_NAME)`
+15. DuckDB, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`; CREATE OR REPLACE TABLE ... AS SELECT: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`
+16. Sail, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE ... AS SELECT, existing table: `AnalysisException: not supported: Replace table is not supported yet`
+17. Sail, Types: decimal, date, timestamp, timestamptz, uuid, binary: types: decimal, date, timestamp, timestamptz, uuid, binary: `works: ['decimal', 'date', 'timestamp', 'timestamptz', 'binary']; refused: uuid: IllegalArgumentException: invalid argument: found UUID at 84:88 expected data type`
+18. DuckDB, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
+19. Sail, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
+20. Sail, Add column: ALTER TABLE ADD COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+21. Sail, Drop column: ALTER TABLE DROP COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+22. Sail, Rename column: ALTER TABLE RENAME COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+23. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_promote`
+24. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
+25. chDB, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 70 (PARTITION): PARTITION FIELD bucket(4, id). Expected one of: COLUMN, INDEX, STATISTICS, PROJECTION, CONSTRAINT, end of query. (SYNTAX_ERROR)`
+26. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_props`
+27. chDB, Set table property: ALTER TABLE SET TBLPROPERTIES: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 64 (SET): SET TBLPROPERTIES ('probed-at' = '37945065317_1'). Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED P…`
+28. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+29. chDB, Sort order evolution: ALTER TABLE MODIFY ORDER BY (sort order evolution): `ChdbError: Code: 48. DB::Exception: Alter of type 'MODIFY_ORDER_BY' is not supported by Iceberg storage. (NOT_IMPLEMENTED)`
+30. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37930015241_1_inspect"), Identifier("snapshots")]`
+31. chDB, Metadata tables: metadata (system.iceberg_history): `400 Malformed request`
+32. Sail, Compaction: CALL system.rewrite_data_files (compaction): `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
+33. chDB, Compaction: OPTIMIZE TABLE (compaction): `returned success and data files went 2 -> 2`
+34. DuckDB, Expire snapshots: iceberg_expire_snapshots: `Catalog Error: Table Function with name iceberg_expire_snapshots does not exist! Did you mean "iceberg_snapshots"?`
+35. Sail, Expire snapshots: CALL system.expire_snapshots: `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
+36. chDB, Expire snapshots: ALTER TABLE ... EXECUTE expire_snapshots: `ChdbError: Code: 48. DB::Exception: expire_snapshots is not supported for Iceberg tables backed by a transactional catalog. (NOT_IMPLEMENTED)`
+37. DuckDB, Create branch: ALTER TABLE ... CREATE BRANCH: `Parser Error: syntax error at or near "CREATE" LINE 1: ... TABLE onelake."_bench_capability"."dk_37930015241_1_branch" CREATE BRANCH probe_branch ^^^^^^`
+38. Sail, Create branch: ALTER TABLE ... CREATE BRANCH: `IllegalArgumentException: invalid argument: found CREATE at 66:72 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+39. chDB, Create branch: ALTER TABLE ... CREATE BRANCH: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 65 (CREATE): CREATE BRANCH probe_branch. Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED PARTITION, DROP DETAC…`
+40. Sail, Create tag: ALTER TABLE ... CREATE TAG: `IllegalArgumentException: invalid argument: found CREATE at 63:69 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+41. chDB, Create tag: ALTER TABLE ... CREATE TAG: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 62 (CREATE): CREATE TAG probe_tag. Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED PARTITION, DROP DETACHED PA…`
+42. chDB, Drop table with purge: DROP TABLE (chDB sends purgeRequested=false): `ChdbError: Code: 736. DB::Exception: Failed to drop table DB::HTTPException: Received error from remote server https://onelake.table.fabric.microsoft.com/iceberg/v1/namespaces/_bench_capability/tables/ch_37945065317_1_droppable?purgeRequested=False. HTTP status code: 405 'Method Not Allowed', body …`
 
 ## DuckDB: isolation levels and transactions
 
@@ -174,7 +185,7 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 
 The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/capability.yml`), which writes this file. Every cell is a reading taken by sending the request, not a property of the product: re-run rather than trust it.
 
-- pyiceberg: 0.12.0, run 37930015241, 2026-10-09
 - duckdb: v2.0.0-alpha46057, run 37930015241, 2026-10-09
 - sail: 0.7.2, run 37930015241, 2026-10-09
+- chdb: 4.4.0, run 37945065317, 2026-10-09
 - duckdb_isolation: v2.0.0-alpha46057, run 37930015241, 2026-10-09
