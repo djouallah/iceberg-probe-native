@@ -90,12 +90,13 @@ def test_duckdb_isolation_rows_fill_the_duckdb_column():
             "levels": {},
             "transactions": [],
             "combos": [],
-            "rows": [_row("race_append"), _row("race_read_write", "no", "skew: final [...]")],
+            "rows": [_row("race_append"), _row("race_delete", "no", "lost: final [...]")],
         },
     }
     text = render_readme.render(data, README)
     lines = text.splitlines()
     assert "| Concurrent append: both kept | — | yes |" in lines
     assert any(
-        ln.startswith("| INSERT ... SELECT racing a writer") and "| — | no " in ln for ln in lines
+        ln.startswith("| Concurrent writer: DELETE loses nothing") and "| na | no " in ln
+        for ln in lines
     )

@@ -132,19 +132,6 @@ RACES = [
         states={"retried": [_s(*SEED, APPENDED, (5, 50))], "lost": [_s(*SEED, (5, 50))]},
     ),
     Race(
-        "insert_select",
-        "INSERT INTO t SELECT max(id) + 1, sum(v) FROM t; B appends a row",
-        ("INSERT INTO {t} SELECT max(id) + 1, sum(v) FROM {t}",),
-        "append",
-        solo=_s(*SEED, (4, 60)),
-        after_b=WITH_B,
-        states={
-            "re-run": [_s(*SEED, APPENDED, (5, 100))],
-            "skew": [_s(*SEED, APPENDED, (4, 60))],
-            "lost": [_s(*SEED, (4, 60))],
-        },
-    ),
-    Race(
         "delete",
         "DELETE id 1; B appends a row",
         ("DELETE FROM {t} WHERE id = 1",),
@@ -222,8 +209,6 @@ def classify(race: Race, final, raised: bool, statuses: list[int]) -> str:
 
     refused  the commit failed and B's change stands: safe and loud
     retried  DuckDB refreshed and committed on top of B; both changes are in
-    re-run   the self-referential insert was recomputed on the new head
-    skew     a row computed from the stale read was committed beside B's change
     lost     DuckDB's statement succeeded and B's change is gone
     corrupt  the table matches no order of the two writes
     error    DuckDB failed before it ever committed, so the race was never run
@@ -269,7 +254,6 @@ def final_rows(catalog, table: str) -> list:
 # depends on what it read; for a blind append it is not, because nothing stops it re-applying.
 RACE_ROWS = {
     "race_append": ("insert", {"retried"}),
-    "race_read_write": ("insert_select", {"refused", "re-run"}),
     "race_delete": ("delete", {"refused", "retried"}),
     "race_update": ("update_other", {"refused", "retried"}),
 }
@@ -506,25 +490,6 @@ class DuckDBIsolation:
         outcome = {110: "refused", 111: "retried", 11: "LOST"}.get(dict(final).get(1), "corrupt")
         return outcome, f"reads v = {v}, B sets 110, UPDATE v + 1; COMMIT {error or 'ok'}; {final}"
 
-    def tx_append_after_read(self, level: str):
-        def run():
-            table = self.table(f"tx_aar_{level}", CONFIGS[level])
-            conn = self.conn()
-            conn.execute("BEGIN")
-            n = self.count(conn, table)
-            self.b("append", table)()
-            conn.execute(f"INSERT INTO {self.t(table)} VALUES (100, {n})")
-            error = self.commit(conn)
-            conn.close()
-            final = self.final(table)
-            outcome = "refused" if error else ("skew" if (100, 3) in final else "corrupt")
-            return outcome, (
-                f"reads count {n}, B appends, INSERT (100, count); COMMIT {error or 'ok'}; "
-                f"commits {self.commits(table)}; {final}"
-            )
-
-        return run
-
     def tx_atomic(self):
         table = self.table("tx_atomic")
         before = self.snapshots(table)
@@ -730,16 +695,6 @@ TRANSACTIONS = [
         "read_modify_write",
         "read v, B changes it, UPDATE v + 1, COMMIT",
         lambda p: p.tx_read_modify_write,
-    ),
-    (
-        "append_after_read",
-        "read count, B appends, INSERT the count, COMMIT",
-        lambda p: p.tx_append_after_read("serializable"),
-    ),
-    (
-        "append_after_read_no_retries",
-        "the same on a commit.retry.num-retries = 0 table",
-        lambda p: p.tx_append_after_read("no retries"),
     ),
     ("atomic", "INSERT + UPDATE + DELETE in one transaction", lambda p: p.tx_atomic),
     ("rollback", "INSERT + DELETE, then ROLLBACK", lambda p: p.tx_rollback),

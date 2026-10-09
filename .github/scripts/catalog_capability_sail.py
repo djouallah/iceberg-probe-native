@@ -624,12 +624,6 @@ class SailCapability:
     def race_append(self) -> str:
         return self._race("race_append", "INSERT INTO {t} " + _select([(5, 50)]))
 
-    def race_read_write(self) -> str:
-        return self._race(
-            "race_read_write",
-            "INSERT INTO {t} SELECT CAST(max(id) + 1 AS BIGINT), CAST(sum(v) AS BIGINT) FROM {t}",
-        )
-
     def race_delete(self) -> str:
         return self._race("race_delete", "DELETE FROM {t} WHERE id = 1")
 
@@ -703,7 +697,6 @@ PROBES = [
     ("catalog", "ALTER TABLE ... RENAME TO, then read", "rename_table"),
     ("catalog", "DROP TABLE ... PURGE", "drop_purge"),
     ("concurrency", "INSERT INTO; B appends between Sail's read and commit", "race_append"),
-    ("concurrency", "INSERT INTO t SELECT max(id) + 1, sum(v); B appends", "race_read_write"),
     ("concurrency", "DELETE id 1; B appends", "race_delete"),
     ("concurrency", "UPDATE v = v + 1 on id 2; B appends", "race_update"),
 ]

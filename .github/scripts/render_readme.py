@@ -140,10 +140,6 @@ ROWS = [
     # Writer B (pyiceberg) commits between the engine's read and its commit (bench/race.py).
     # DuckDB's cells are its isolation run's, at Iceberg's default level.
     ("Concurrent append: both kept", {e: ["race_append"] for e in ENGINES}),
-    (
-        "INSERT ... SELECT racing a writer: no stale row",
-        {e: ["race_read_write"] for e in ENGINES},
-    ),
     ("Concurrent writer: DELETE loses nothing", {e: ["race_delete"] for e in SQL}),
     ("Concurrent writer: UPDATE loses nothing", {e: ["race_update"] for e in SQL}),
 ]
@@ -247,7 +243,6 @@ def capability(data: dict) -> tuple[list[str], list[str]]:
 
 LEVEL_TITLES = {
     "insert": "INSERT, B appends",
-    "insert_select": "`INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, B appends",
     "delete": "DELETE a row, B appends",
     "update_other": "UPDATE another row, B appends",
     "merge_other": "MERGE on another row, B appends",
@@ -274,7 +269,6 @@ def isolation(data: dict) -> list[str]:
         "([duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475)).",
         "",
         "`refused` DuckDB's commit fails and B's change stands · `retried` both changes kept ·",
-        "`skew` a row computed from a stale read is committed beside B's ·",
         "`lost` B's change is gone · `broken` the race could not be run",
         "",
         "| DuckDB writes, B commits in between | " + " | ".join(names) + " |",

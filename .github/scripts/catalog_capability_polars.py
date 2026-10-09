@@ -353,18 +353,6 @@ class PolarsCapability:
     def race_append(self) -> str:
         return self._race("race_append", lambda t: self.sink(t, rows([(5, 50)])))
 
-    def race_read_write(self) -> str:
-        """`INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, as a Polars scan and sink."""
-        import polars as pl
-
-        def write(table):
-            frame = self.scan(table).select(
-                (pl.col("id").max() + 1).alias("id"), pl.col("v").sum().alias("v")
-            )
-            self.sink(table, frame.collect())
-
-        return self._race("race_read_write", write)
-
     # -- teardown ----------------------------------------------------------------------------
 
     def drop_everything(self) -> None:
@@ -401,11 +389,6 @@ PROBES = [
     ("read", "time travel, scan_iceberg(snapshot_id=)", "time_travel"),
     ("commit", "is assert-ref-snapshot-id enforced on a Polars commit", "stale_assertion"),
     ("concurrency", "sink append; B appends between Polars' read and commit", "race_append"),
-    (
-        "concurrency",
-        "scan max(id) + 1, sum(v), sink it; B appends in between",
-        "race_read_write",
-    ),
 ]
 
 

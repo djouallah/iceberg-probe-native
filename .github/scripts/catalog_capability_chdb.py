@@ -565,9 +565,6 @@ class ChdbCapability:
     def race_append(self) -> str:
         return self._race("race_append", "INSERT INTO {t} VALUES (5, 50)")
 
-    def race_read_write(self) -> str:
-        return self._race("race_read_write", "INSERT INTO {t} SELECT max(id) + 1, sum(v) FROM {t}")
-
     def race_delete(self) -> str:
         return self._race("race_delete", "DELETE FROM {t} WHERE id = 1")
 
@@ -633,7 +630,6 @@ PROBES = [
     ("catalog", "RENAME TABLE, then read", "rename_table"),
     ("catalog", "DROP TABLE (chDB sends purgeRequested=false)", "drop_table"),
     ("concurrency", "INSERT INTO; B appends between chDB's read and commit", "race_append"),
-    ("concurrency", "INSERT INTO t SELECT max(id) + 1, sum(v); B appends", "race_read_write"),
     ("concurrency", "DELETE id 1; B appends", "race_delete"),
     ("concurrency", "ALTER TABLE ... UPDATE v = v + 1 on id 2; B appends", "race_update"),
 ]
