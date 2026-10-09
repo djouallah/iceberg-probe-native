@@ -58,7 +58,8 @@ from catalog_capability import (
 
 from bench import auth, scrub
 from bench.config import ICEBERG_ENDPOINT, Config, azure_transport
-from bench.engines.duckdb_iceberg import CATALOG, attach
+from bench.engines.duckdb_iceberg import CATALOG, attach, connect
+from bench.engines.duckdb_iceberg import version as duckdb_version
 
 SEED = [(1, 10), (2, 20), (3, 30)]
 SEED_SELECT = "SELECT * FROM (VALUES (1::BIGINT, 10::BIGINT), (2, 20), (3, 30)) AS s(id, v)"
@@ -124,26 +125,18 @@ class DuckDBCapability:
     # -- the connection ----------------------------------------------------------------------
 
     def _connect(self):
-        import duckdb
-
-        conn = duckdb.connect()
+        conn = connect()
         attach(conn, self.cfg, self._token)
         return conn
 
     def sql(self, statement: str, echo: bool = True) -> list[tuple]:
         """One statement. DuckDB's own `no` becomes `Refused`."""
-        import duckdb
-
         if echo:
             _say(f"       > {_one_line(statement, 300)}")
         try:
-            rel = self._c.execute(statement)
-            try:
-                return list(rel.fetchall())
-            except duckdb.InvalidInputError:
-                return []  # a statement with no result set
-        except duckdb.Error as exc:
-            raise Refused(_one_line(f"{type(exc).__name__}: {exc}")) from None
+            return list(self._c.execute(statement).fetchall())
+        except RuntimeError as exc:
+            raise Refused(_one_line(str(exc))) from None
 
     # -- naming ------------------------------------------------------------------------------
 
@@ -235,9 +228,7 @@ class DuckDBCapability:
     # -- session -----------------------------------------------------------------------------
 
     def session(self) -> str:
-        import duckdb
-
-        self.version = duckdb.__version__
+        self.version = duckdb_version()
         self._token = auth.onelake_token()
         self._c = self._connect()
         self.attached = True
@@ -826,10 +817,8 @@ class DuckDBCapability:
         """ACCESS_DELEGATION_MODE 'vended_credentials' and NO storage secret, on a connection of
         its own: every byte of storage goes through the SAS token the catalog vends for the
         table, so a read and a write that land prove the vended credential carries both."""
-        import duckdb
-
         table = self._fresh("vended")
-        conn = duckdb.connect()
+        conn = connect()
         try:
             conn.execute(
                 f"SET GLOBAL azure_transport_option_type = '{azure_transport() or 'default'}'"
@@ -842,8 +831,8 @@ class DuckDBCapability:
             )
             read = conn.execute(f"SELECT count(*) FROM {self.t(table)}").fetchall()[0][0]
             conn.execute(f"INSERT INTO {self.t(table)} VALUES (4, 40)")
-        except duckdb.Error as exc:
-            raise Refused(_one_line(f"{type(exc).__name__}: {exc}")) from None
+        except RuntimeError as exc:
+            raise Refused(_one_line(str(exc))) from None
         finally:
             conn.close()
         return self._expect(

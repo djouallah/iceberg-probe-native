@@ -92,6 +92,12 @@ jobs:
           pip install -r "$REQS"
           pip list --format=freeze | grep -Ei '^(pyiceberg|pyarrow|duckdb|pysail|chdb)=' || true
 
+      # DuckDB is the nightly CLI, not a wheel: bench/duckdb_cli.py says why, and
+      # .github/scripts/duckdb_nightly.py picks the newest nightly whose extensions are published.
+      - name: DuckDB nightly CLI
+        if: matrix.client == 'duckdb' || matrix.client == 'duckdb_isolation'
+        uses: ./.github/actions/duckdb-nightly
+
       # OIDC only. No client secret exists on this app registration.
       - uses: azure/login@v3
         with:

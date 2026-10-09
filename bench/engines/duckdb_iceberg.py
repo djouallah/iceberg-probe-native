@@ -14,9 +14,48 @@ Storage goes through the azure extension under an `access_token` secret, with
 
 from __future__ import annotations
 
+import re
+
 from bench.config import ICEBERG_ENDPOINT, Config, azure_transport
+from bench.duckdb_cli import DuckDBCli, Result
+from bench.duckdb_cli import version as cli_version
 
 CATALOG = "onelake"
+_INT = re.compile(r"^-?\d+$")
+
+
+def _value(cell: str):
+    """A CSV cell as the probes compare it: NULL (empty) is None, an integer is an int."""
+    if cell == "":
+        return None
+    return int(cell) if _INT.match(cell) else cell
+
+
+class Connection:
+    """The nightly CLI (bench.duckdb_cli says why not the wheel), answering like a
+    `duckdb.connect()`: `execute()` and `sql()` run SQL and return rows, `close()` ends the
+    process. A failed statement raises RuntimeError with DuckDB's own message."""
+
+    def __init__(self):
+        self._cli = DuckDBCli()
+
+    def execute(self, sql: str) -> Result:
+        rows = self._cli.sql(sql).fetchall()
+        return Result([tuple(_value(cell) for cell in row) for row in rows])
+
+    sql = execute
+
+    def close(self) -> None:
+        self._cli.close()
+
+
+def connect() -> Connection:
+    return Connection()
+
+
+def version() -> str:
+    """The CLI's library version, e.g. `v2.0.0-alpha44357`."""
+    return cli_version()
 
 
 def attach(conn, cfg: Config, token: str, endpoint: str = ICEBERG_ENDPOINT) -> None:

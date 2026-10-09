@@ -1,2 +1,3 @@
+# The DuckDB probes: pyiceberg's set for the cross-check reads. DuckDB itself is the nightly CLI
+# (.github/actions/duckdb-nightly), not a wheel: bench/duckdb_cli.py says why.
 -r catalog.txt
-duckdb>=2.0.0.dev0

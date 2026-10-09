@@ -236,10 +236,10 @@ def classify(race: Race, final, raised: bool, statuses: list[int]) -> str:
 
 class DuckDBIsolation:
     def __init__(self, cfg: Config):
-        import duckdb
+        from bench.engines.duckdb_iceberg import version
 
         self.cfg = cfg
-        self.version = duckdb.__version__
+        self.version = version()
         self.proxy = RaceProxy().start()
         self.catalog = auth.catalog(cfg)  # B, and every read of the final state
         self.token = auth.onelake_token()
@@ -263,11 +263,9 @@ class DuckDBIsolation:
             self.catalog = auth.catalog(self.cfg)
 
     def conn(self):
-        import duckdb
+        from bench.engines.duckdb_iceberg import attach, connect
 
-        from bench.engines.duckdb_iceberg import attach
-
-        conn = duckdb.connect()
+        conn = connect()
         attach(conn, self.cfg, self.token, self.proxy.endpoint)
         conn.execute("SET iceberg_use_metadata_log = false")
         return conn
