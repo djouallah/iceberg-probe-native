@@ -21,8 +21,6 @@ effect is a no-op, not a yes.
 Every error DuckDB raises is a `no` carrying its full message. The OneLake token is in the ATTACH,
 so everything printed goes through bench.scrub.
 
-This is a private preview under active development, so everything here is a reading taken on a
-date rather than a property of the product.
 """
 
 from __future__ import annotations
@@ -820,9 +818,7 @@ class DuckDBCapability:
         table = self._fresh("vended")
         conn = connect()
         try:
-            conn.execute(
-                f"SET GLOBAL azure_transport_option_type = '{azure_transport() or 'default'}'"
-            )
+            conn.execute(f"SET GLOBAL azure_transport_option_type = '{azure_transport()}'")
             conn.execute(
                 f"ATTACH '{self.cfg.warehouse}' AS {CATALOG} (TYPE ICEBERG, "
                 f"ENDPOINT '{ICEBERG_ENDPOINT}', TOKEN '{self._token}', "

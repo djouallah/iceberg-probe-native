@@ -45,7 +45,7 @@ class LakesailIceberg:
         token = auth.onelake_token()
 
         # Sail is configured by environment, read once at server start -- so the token is captured
-        # here and never refreshed, the same ceiling DuckDB and chDB have.
+        # here and never refreshed, the same ceiling DuckDB has.
         os.environ["SAIL_OPTIMIZER__ENABLE_JOIN_REORDER"] = "true"
         os.environ["SAIL_EXECUTION__COLLECT_STATISTICS"] = "true"
         # THE STORAGE TOKEN, which is separate from the catalog token below.
@@ -64,8 +64,8 @@ class LakesailIceberg:
         #
         # AZURE_STORAGE_TOKEN takes precedence over that whole chain. It is what Sail's own
         # OneLake example sets, with a token for the same https://storage.azure.com/ audience we
-        # already hold -- so DuckDB, chDB and LakeSail all authenticate storage with one bearer
-        # token and none of them pays for vending.
+        # already hold -- so DuckDB and LakeSail both authenticate storage with one bearer token
+        # and neither pays for vending.
         os.environ["AZURE_STORAGE_TOKEN"] = token
 
         # The two cache settings do NOT cache the table. In Sail 0.7 they cache the namespace's
@@ -73,8 +73,8 @@ class LakesailIceberg:
         # once per table it touches, which is the per-table WARN line in the log. Kept so the
         # constant applies the day Sail caches the loaded table. See config.CATALOG_CACHE_SECONDS
         # and lakehq/sail#2629.
-        # Sail's `onelake` catalog hard-codes the public host, so another channel (ONELAKE_HOST)
-        # goes through its generic Iceberg REST catalog instead.
+        # Sail's `onelake` catalog hard-codes the public host, so any other endpoint (the
+        # isolation probe's local proxy) goes through its generic Iceberg REST catalog instead.
         if ICEBERG_ENDPOINT == "https://onelake.table.fabric.microsoft.com/iceberg":
             where = (
                 f'type="onelake", url="{self.cfg.warehouse}", api="iceberg", bearer_token="{token}"'

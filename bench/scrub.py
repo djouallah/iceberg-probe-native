@@ -1,10 +1,10 @@
 """Redact live bearer tokens from anything that might be written down.
 
 WHY THIS IS A MODULE AND NOT AN INLINE str.replace. The OneLake token is embedded in SQL TEXT --
-DuckDB's `ATTACH ... TOKEN '<tok>'`, chDB's `CREATE DATABASE ... onelake_bearer_token='<tok>'` --
-and in an ENV VAR (`SAIL_CATALOG__LIST`). Engines quote the failing statement back at you in
-exception messages. One unhandled attach failure prints an Entra token into a world-readable
-Actions log, and from there into `results/*.json`, which is committed to git forever.
+DuckDB's `ATTACH ... TOKEN '<tok>'` -- and in an ENV VAR (`SAIL_CATALOG__LIST`). Engines
+quote the failing statement back at you in exception messages. One unhandled attach failure
+prints an Entra token into a world-readable Actions log, and from there into `results/*.json`,
+which is committed to git forever.
 
 `::add-mask::` in the workflow is NOT sufficient on its own: it only masks verbatim contiguous
 appearances. A token that a traceback line-wraps, elides with "..." or truncates slips straight

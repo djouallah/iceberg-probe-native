@@ -5,23 +5,19 @@ lifetime each engine is given, the DuckDB transport rule, and `Config` (workspac
 from __future__ import annotations
 
 import os
-import platform
 from dataclasses import dataclass
 
-# The OneLake host prefix: `onelake` is the public endpoint. ONELAKE_HOST points every probe at
-# another channel -- that channel's host name is set in the shell and never written here.
-_HOST = os.environ.get("ONELAKE_HOST", "onelake")
-ICEBERG_ENDPOINT = f"https://{_HOST}.table.fabric.microsoft.com/iceberg"
-ONELAKE_DFS = f"{_HOST}.dfs.fabric.microsoft.com"
-ONELAKE_BLOB = f"{_HOST}.blob.fabric.microsoft.com"
+ICEBERG_ENDPOINT = "https://onelake.table.fabric.microsoft.com/iceberg"
+ONELAKE_DFS = "onelake.dfs.fabric.microsoft.com"
+ONELAKE_BLOB = "onelake.blob.fabric.microsoft.com"
 STORAGE_SCOPE = "https://storage.azure.com/.default"
 
 # How long an engine may cache catalog metadata. One number, each engine derives its own spelling.
 CATALOG_CACHE_SECONDS = 900  # 15 minutes
 
 
-def azure_transport() -> str | None:
-    """Which HTTP transport DuckDB's azure extension should use, or None to leave its default.
+def azure_transport() -> str:
+    """Which HTTP transport DuckDB's azure extension should use.
 
     THE SINGLE MOST EXPENSIVE THING TO GET WRONG HERE, because getting it wrong does not look
     like a transport problem. DuckDB's azure extension has its own HTTP stack, separate from the
@@ -37,15 +33,9 @@ def azure_transport() -> str | None:
     which reads exactly like a missing storage credential and is not one. A genuinely bad
     credential says `Unauthorized`.
 
-    On Windows DuckDB's bundled libcurl has no CA bundle, so there the default (WinHTTP), which
-    trusts the system cert store, is the one that works.
-
-    An explicit AZURE_TRANSPORT_OPTION_TYPE always wins.
+    An explicit AZURE_TRANSPORT_OPTION_TYPE wins.
     """
-    override = os.environ.get("AZURE_TRANSPORT_OPTION_TYPE")
-    if override:
-        return override
-    return None if platform.system() == "Windows" else "curl"
+    return os.environ.get("AZURE_TRANSPORT_OPTION_TYPE") or "curl"
 
 
 @dataclass(frozen=True)

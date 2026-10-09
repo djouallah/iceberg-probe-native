@@ -1,6 +1,6 @@
 """A REST proxy that puts another writer's commit between an engine's read and its commit.
 
-WHY A PROXY. Sail and chDB have no multi-statement transaction: one statement loads the table,
+WHY A PROXY. Most engines have no multi-statement transaction: one statement loads the table,
 plans the write and commits it, and nothing outside can land a commit inside that window on
 purpose. The window does show on the wire, though. The engine's commit is a POST to
 `.../namespaces/{ns}/tables/{table}` built on the snapshot it read. Hold that POST, commit

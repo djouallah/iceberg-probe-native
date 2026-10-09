@@ -61,7 +61,7 @@ def version() -> str:
 def attach(conn, cfg: Config, token: str, endpoint: str = ICEBERG_ENDPOINT) -> None:
     """The write-capable ATTACH on one connection: transport, storage secret, the two flags."""
     conn.sql(f"""
-        SET GLOBAL azure_transport_option_type = '{azure_transport() or "default"}';
+        SET GLOBAL azure_transport_option_type = '{azure_transport()}';
         SET preserve_insertion_order = false;
 
         CREATE OR REPLACE SECRET onelake_storage (

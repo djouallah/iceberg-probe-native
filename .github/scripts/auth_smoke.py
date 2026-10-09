@@ -140,7 +140,7 @@ def main() -> int:
 
         token = auth.onelake_token()
         # The configured transport first; the others only to report what would have worked.
-        candidates = [azure_transport() or "default"]
+        candidates = [azure_transport()]
         candidates += [t for t in ("curl", "default") if t not in candidates]
 
         outcomes, winner = [], None

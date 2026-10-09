@@ -47,7 +47,6 @@ jobs:
       ${{ matrix.client == 'duckdb' && '🦆 DuckDB (pre-release)'
       || matrix.client == 'pyiceberg' && '🧊 pyiceberg'
       || matrix.client == 'sail' && '⛵ Sail'
-      || matrix.client == 'chdb' && '🐭 chDB'
       || matrix.client == 'duckdb_isolation' && '🦆 DuckDB isolation and transactions'
       || matrix.client }}
     runs-on: ubuntu-latest
@@ -73,12 +72,10 @@ jobs:
       RESULTS_FILE: results/${{ matrix.client }}.json
       REQS: >-
         requirements/${{ (matrix.client == 'duckdb' || matrix.client == 'duckdb_isolation') && 'duckdb_capability'
-        || matrix.client == 'sail' && 'sail_capability'
-        || matrix.client == 'chdb' && 'chdb_capability' || 'catalog' }}.txt
+        || matrix.client == 'sail' && 'sail_capability' || 'catalog' }}.txt
       SCRIPT: >-
         .github/scripts/${{ matrix.client == 'duckdb_isolation' && 'isolation_duckdb' || 'catalog_capability' }}${{ matrix.client == 'duckdb' && '_duckdb'
-        || matrix.client == 'sail' && '_sail'
-        || matrix.client == 'chdb' && '_chdb' || '' }}.py
+        || matrix.client == 'sail' && '_sail' || '' }}.py
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -92,7 +89,7 @@ jobs:
       - name: Install ${{ matrix.client }}
         run: |
           pip install -r "$REQS"
-          pip list --format=freeze | grep -Ei '^(pyiceberg|pyarrow|duckdb|pysail|chdb)=' || true
+          pip list --format=freeze | grep -Ei '^(pyiceberg|pyarrow|duckdb|pysail)=' || true
 
       # DuckDB is the nightly CLI, not a wheel: bench/duckdb_cli.py says why, and
       # .github/scripts/duckdb_nightly.py picks the newest nightly whose extensions are published.

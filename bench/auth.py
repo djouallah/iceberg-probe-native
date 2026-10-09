@@ -1,4 +1,4 @@
-"""OneLake credentials: GitHub OIDC in Actions, `az login` on a laptop.
+"""OneLake credentials: GitHub OIDC, in Actions only.
 
 WHY NOT AzureCliCredential, despite `azure/login` running in the workflow. `azure/login@v3`
 performs `az login --federated-token <the GitHub OIDC assertion>`. That is a CLIENT-ASSERTION
@@ -11,7 +11,7 @@ ClientAssertionCredential over the GitHub OIDC endpoint has no such ceiling: it 
 assertion on every refresh, straight from the Actions runtime. It needs no new trust
 configuration -- same app registration, same federated credential, same
 `api://AzureADTokenExchange` audience that `azure/login` itself uses -- and it removes the Azure
-CLI from the Python process, so `bench/` behaves identically on a laptop.
+CLI from the Python process.
 
 WHAT THIS STILL CANNOT FIX. DuckDB bakes the token into `ATTACH` and LakeSail into an env var
 read once at server start. Both capture a STRING and never ask again, so an engine session is
@@ -60,21 +60,16 @@ def _github_oidc_assertion() -> str:
 
 
 def credential() -> TokenCredential:
-    """The process-wide credential: OIDC in Actions, `az login` on a laptop."""
+    """The process-wide credential: the workflow's GitHub OIDC token, exchanged for Entra."""
     global _credential
     if _credential is None:
-        if os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"):
-            from azure.identity import ClientAssertionCredential
+        from azure.identity import ClientAssertionCredential
 
-            _credential = ClientAssertionCredential(
-                tenant_id=os.environ["AZURE_TENANT_ID"],
-                client_id=os.environ["AZURE_CLIENT_ID"],
-                func=_github_oidc_assertion,
-            )
-        else:
-            from azure.identity import AzureCliCredential
-
-            _credential = AzureCliCredential()
+        _credential = ClientAssertionCredential(
+            tenant_id=os.environ["AZURE_TENANT_ID"],
+            client_id=os.environ["AZURE_CLIENT_ID"],
+            func=_github_oidc_assertion,
+        )
     return _credential
 
 

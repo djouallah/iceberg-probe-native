@@ -32,8 +32,6 @@ included (duckdb-iceberg#1475). Off, a transaction pins each table at its first 
 
     python .github/scripts/isolation_duckdb.py [--no-race] [--only key,key]
 
-This is a private preview under active development, so everything here is a reading taken on a
-date rather than a property of the product.
 """
 
 from __future__ import annotations

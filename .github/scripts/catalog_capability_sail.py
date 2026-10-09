@@ -13,8 +13,6 @@ EVERY PROBE CHECKS ITS EFFECT through pyiceberg, which reads what the CATALOG no
 what Sail cached. Accepted with no effect is a no-op, not a yes. Every error Sail raises is a `no`
 carrying its full message, so the log says whose limit it is.
 
-This is a private preview under active development, so everything here is a reading taken on a
-date rather than a property of the product.
 """
 
 from __future__ import annotations

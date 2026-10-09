@@ -1,4 +1,0 @@
-# The chDB capability probe: pyiceberg's set for the cross-check reads, plus chDB. 4.4.0 is the
-# first release with `onelake_bearer_token`; older wheels fail the attach with "Unknown setting".
--r catalog.txt
-chdb>=4.4.0
