@@ -1,7 +1,7 @@
 [project]
 name = "bench"
 version = "0.1.0"
-description = "What pyiceberg, DuckDB, Sail and chDB can do against the OneLake Iceberg REST catalog"
+description = "What Polars, DuckDB, Sail and chDB can do against the OneLake Iceberg REST catalog"
 requires-python = ">=3.12"
 
 [tool.ruff]

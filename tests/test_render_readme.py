@@ -41,12 +41,12 @@ DATA = {
             _row("merge_by_source_only"),
         ],
     },
-    "pyiceberg": {
-        "engine": "pyiceberg",
-        "version": "0.12.0",
+    "polars": {
+        "engine": "polars",
+        "version": "2.0.0",
         "run": "1",
         "date": "2026-10-09",
-        "rows": [_row("create_table")],
+        "rows": [_row("sink_append")],
     },
 }
 
@@ -67,7 +67,7 @@ def test_unprobed_is_a_dash_and_absent_engine_is_na():
 def test_refusals_get_a_note_quoting_the_detail():
     text = render_readme.render(DATA, README)
     merge = next(ln for ln in text.splitlines() if ln.startswith("| MERGE INTO / upsert |"))
-    assert merge == "| MERGE INTO / upsert | — | no ¹ |"
+    assert merge == "| MERGE INTO / upsert | na | no ¹ |"
     assert "1. DuckDB, MERGE INTO / upsert: merge_into: `400 Duplicate types: add-snapshot`" in text
 
 

@@ -1,0 +1,4 @@
+# The Polars capability probe: pyiceberg's set, which creates the tables, checks every effect and
+# commits Polars' writes, plus Polars. 2.0.0 is the first release with LazyFrame.sink_iceberg.
+-r catalog.txt
+polars>=2.0.0

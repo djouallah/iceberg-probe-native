@@ -4,8 +4,9 @@ The endpoint has no published documentation, so what it supports is established 
 request and reading the answer. This script sends them, one per probe, and prints what came back.
 A `no` is as useful as a `yes` and is quoted in the server's own words.
 
-EVERYTHING HERE IS A READING, not a property of the product: readme.md carries the readings and
-the run they come from, written by CI from results/pyiceberg.json.
+EVERYTHING HERE IS A READING, not a property of the product: results/pyiceberg.json keeps the
+latest, and the handwritten "Blocked by the OneLake catalog" section of readme.md rests on them.
+pyiceberg is not a readme column; Polars, which commits through it, is.
 
 IT IS NOT A BENCHMARK. Nothing is timed, and a probe that comes back `no` does not fail the job.
 The only non-zero exit is a credential failure, because then nothing was read at all.

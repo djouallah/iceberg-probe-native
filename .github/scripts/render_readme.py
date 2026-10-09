@@ -19,11 +19,13 @@ import re
 import sys
 from pathlib import Path
 
-ENGINES = ("pyiceberg", "duckdb", "sail", "chdb")
-TITLE = {"pyiceberg": "pyiceberg", "duckdb": "DuckDB", "sail": "Sail", "chdb": "chDB"}
-LANGUAGE = {"pyiceberg": "Python", "duckdb": "C++", "sail": "Rust", "chdb": "C++"}
+ENGINES = ("polars", "duckdb", "sail", "chdb")
+# The ones with SQL, for the rows Polars has no operation for.
+SQL = ("duckdb", "sail", "chdb")
+TITLE = {"polars": "Polars", "duckdb": "DuckDB", "sail": "Sail", "chdb": "chDB"}
+LANGUAGE = {"polars": "Rust", "duckdb": "C++", "sail": "Rust", "chdb": "C++"}
 IMPLEMENTATION = {
-    "pyiceberg": "own, pyarrow for the files",
+    "polars": "own parquet reader and writer, pyiceberg for the catalog and commit",
     "duckdb": "own",
     "sail": "own, on DataFusion",
     "chdb": "ClickHouse's own",
@@ -34,28 +36,15 @@ BLOCKED_END = "<!-- blocked:end -->"
 
 # (row label, {engine: probe keys}); an engine missing from the dict has no such operation.
 ROWS = [
-    (
-        "CREATE TABLE",
-        {"pyiceberg": ["create_table"], "duckdb": ["create_table"], "sail": ["create_table"]},
-    ),
+    ("CREATE TABLE", {"duckdb": ["create_table"], "sail": ["create_table"]}),
     (
         "INSERT / append",
-        {"pyiceberg": ["append"], "duckdb": ["insert_values"], "sail": ["insert_into"]},
+        {"polars": ["sink_append"], "duckdb": ["insert_values"], "sail": ["insert_into"]},
     ),
     ("INSERT ... SELECT", {"duckdb": ["insert_select"]}),
-    (
-        "DELETE",
-        {
-            "pyiceberg": ["delete_whole_file", "delete_partial_file"],
-            "duckdb": ["delete_from"],
-            "sail": ["delete_from"],
-        },
-    ),
+    ("DELETE", {"duckdb": ["delete_from"], "sail": ["delete_from"]}),
     ("UPDATE", {"duckdb": ["update"], "sail": ["update"]}),
-    (
-        "MERGE INTO / upsert",
-        {"pyiceberg": ["upsert"], "duckdb": ["merge_into"], "sail": ["merge_into"]},
-    ),
+    ("MERGE INTO / upsert", {"duckdb": ["merge_into"], "sail": ["merge_into"]}),
     (
         "MERGE with one action",
         {
@@ -74,18 +63,14 @@ ROWS = [
     (
         "INSERT OVERWRITE, whole table",
         {
-            "pyiceberg": ["overwrite_whole"],
+            "polars": ["sink_overwrite"],
             "duckdb": ["insert_overwrite"],
             "sail": ["insert_overwrite"],
         },
     ),
     (
         "INSERT OVERWRITE, one partition / by filter",
-        {
-            "pyiceberg": ["overwrite_filtered"],
-            "duckdb": ["overwrite_partition"],
-            "sail": ["overwrite_partition"],
-        },
+        {"duckdb": ["overwrite_partition"], "sail": ["overwrite_partition"]},
     ),
     (
         "Several writes in one transaction",
@@ -96,6 +81,7 @@ ROWS = [
     (
         "CREATE OR REPLACE TABLE",
         {
+            "polars": ["schema_overwrite"],
             "duckdb": ["create_or_replace", "create_or_replace_as_select"],
             "sail": ["create_or_replace"],
         },
@@ -103,7 +89,7 @@ ROWS = [
     (
         "Partitioned table",
         {
-            "pyiceberg": ["create_partitioned"],
+            "polars": ["partitioned"],
             "duckdb": ["create_partitioned"],
             "sail": ["partitioned"],
         },
@@ -119,59 +105,38 @@ ROWS = [
         {e: ["types_scalar"] for e in ENGINES},
     ),
     ("Nested types: struct, list, map", {e: ["types_nested"] for e in ENGINES}),
+    ("format-version 3", {"duckdb": ["format_v3"], "sail": ["format_v3"]}),
     (
-        "format-version 3",
-        {"pyiceberg": ["create_v3"], "duckdb": ["format_v3"], "sail": ["format_v3"]},
+        "Add column",
+        {"polars": ["schema_merge_add_column"], **{e: ["add_column"] for e in SQL}},
     ),
-    ("Add column", {e: ["add_column"] for e in ENGINES}),
-    ("Drop column", {e: ["drop_column"] for e in ENGINES}),
-    ("Rename column", {e: ["rename_column"] for e in ENGINES}),
+    ("Drop column", {e: ["drop_column"] for e in SQL}),
+    ("Rename column", {e: ["rename_column"] for e in SQL}),
     ("Type promotion (int → long)", {e: ["type_promotion"] for e in ENGINES}),
-    ("Partition evolution", {e: ["partition_evolution"] for e in ENGINES}),
+    ("Partition evolution", {e: ["partition_evolution"] for e in SQL}),
     (
         "Write after partition evolution",
-        {"pyiceberg": ["write_after_evolution"], "duckdb": ["write_after_evolution"]},
+        {"polars": ["write_after_evolution"], "duckdb": ["write_after_evolution"]},
     ),
-    ("Set table property", {e: ["set_property"] for e in ENGINES}),
-    (
-        "Sort order at create",
-        {"pyiceberg": ["create_sorted"], "duckdb": ["create_sorted_at_create"]},
-    ),
-    (
-        "Sort order evolution",
-        {
-            "pyiceberg": ["sort_order_evolution"],
-            "duckdb": ["create_sorted"],
-            "sail": ["sort_order"],
-        },
-    ),
+    ("Set table property", {e: ["set_property"] for e in SQL}),
+    ("Sort order at create", {"duckdb": ["create_sorted_at_create"]}),
+    ("Sort order evolution", {"duckdb": ["create_sorted"], "sail": ["sort_order"]}),
     ("Time travel", {e: ["time_travel"] for e in ENGINES}),
     (
         "Metadata tables",
-        {
-            "pyiceberg": ["metadata_tables"],
-            "duckdb": ["metadata_snapshots", "metadata_files"],
-            "sail": ["metadata_tables"],
-        },
+        {"duckdb": ["metadata_snapshots", "metadata_files"], "sail": ["metadata_tables"]},
     ),
     ("Compaction", {"duckdb": ["rewrite_data_files"], "sail": ["rewrite_data_files"]}),
-    ("Expire snapshots", {e: ["expire_snapshots"] for e in ENGINES}),
-    ("Create branch", {e: ["create_branch"] for e in ENGINES}),
-    ("Create tag", {"pyiceberg": ["create_tag"], "sail": ["create_tag"]}),
-    (
-        "Drop table with purge",
-        {"pyiceberg": ["drop_purge"], "duckdb": ["drop_table"], "sail": ["drop_purge"]},
-    ),
+    ("Expire snapshots", {e: ["expire_snapshots"] for e in SQL}),
+    ("Create branch", {e: ["create_branch"] for e in SQL}),
+    ("Create tag", {"sail": ["create_tag"]}),
+    ("Drop table with purge", {"duckdb": ["drop_table"], "sail": ["drop_purge"]}),
     (
         "Create / drop namespace",
-        {
-            "pyiceberg": ["create_namespace"],
-            "duckdb": ["create_schema", "drop_schema"],
-            "sail": ["namespace"],
-        },
+        {"duckdb": ["create_schema", "drop_schema"], "sail": ["namespace"]},
     ),
-    ("Credential vending", {"pyiceberg": ["vended_only"], "duckdb": ["credential_vending"]}),
-    ("A commit against a stale snapshot is refused", {"pyiceberg": ["stale_assertion"]}),
+    ("Credential vending", {"duckdb": ["credential_vending"]}),
+    ("A commit against a stale snapshot is refused", {"polars": ["stale_assertion"]}),
 ]
 
 # chDB's probe keys where they differ from the row's shared name; the rows built over ENGINES
@@ -363,7 +328,7 @@ def render(data: dict, readme: str) -> str:
     out = [
         "# OneLake Iceberg REST catalog: what the native engines can do",
         "",
-        "pyiceberg, DuckDB and Sail: engines with their own Iceberg implementation, no JVM.",
+        "Polars, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no JVM.",
         "",
         "`yes` works · `no` refused · `no-op` accepted but not applied · `na` the engine has no "
         "such operation · `—` not probed · `?` the probe could not ask",
