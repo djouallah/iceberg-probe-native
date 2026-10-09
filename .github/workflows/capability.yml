@@ -11,14 +11,13 @@ on:
         description: Which clients to ask.
         type: choice
         options:
-          - pyiceberg,duckdb,sail,chdb,duckdb_isolation
+          - pyiceberg,duckdb,sail,duckdb_isolation
           - pyiceberg
           - duckdb
           - sail
-          - chdb
           - duckdb_isolation
           - duckdb,duckdb_isolation
-        default: pyiceberg,duckdb,sail,chdb,duckdb_isolation
+        default: pyiceberg,duckdb,sail,duckdb_isolation
       keep:
         description: Leave the probe tables behind, to inspect them in Fabric.
         type: boolean
@@ -37,7 +36,7 @@ jobs:
     steps:
       - id: plan
         run: |
-          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,chdb,duckdb_isolation' }}" \
+          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,duckdb_isolation' }}" \
             | jq -Rc 'split(",") | map(sub("^\\s+";"") | sub("\\s+$";"")) | map(select(length > 0))')
           echo "clients=$CLIENTS" >> "$GITHUB_OUTPUT"
           echo "clients: $CLIENTS"
