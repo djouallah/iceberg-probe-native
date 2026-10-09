@@ -11,12 +11,13 @@ on:
         description: Which clients to ask.
         type: choice
         options:
-          - pyiceberg,duckdb,sail,chdb
+          - pyiceberg,duckdb,sail,chdb,duckdb_isolation
           - pyiceberg
           - duckdb
           - sail
           - chdb
-        default: pyiceberg,duckdb,sail,chdb
+          - duckdb_isolation
+        default: pyiceberg,duckdb,sail,chdb,duckdb_isolation
       keep:
         description: Leave the probe tables behind, to inspect them in Fabric.
         type: boolean
@@ -35,7 +36,7 @@ jobs:
     steps:
       - id: plan
         run: |
-          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,chdb' }}" \
+          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,chdb,duckdb_isolation' }}" \
             | jq -Rc 'split(",") | map(sub("^\\s+";"") | sub("\\s+$";"")) | map(select(length > 0))')
           echo "clients=$CLIENTS" >> "$GITHUB_OUTPUT"
           echo "clients: $CLIENTS"
@@ -47,6 +48,7 @@ jobs:
       || matrix.client == 'pyiceberg' && '🧊 pyiceberg'
       || matrix.client == 'sail' && '⛵ Sail'
       || matrix.client == 'chdb' && '🐭 chDB'
+      || matrix.client == 'duckdb_isolation' && '🦆 DuckDB isolation and transactions'
       || matrix.client }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -68,11 +70,11 @@ jobs:
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       CAPABILITY_KEEP: ${{ inputs.keep && '1' || '0' }}
       REQS: >-
-        requirements/${{ matrix.client == 'duckdb' && 'duckdb_capability'
+        requirements/${{ (matrix.client == 'duckdb' || matrix.client == 'duckdb_isolation') && 'duckdb_capability'
         || matrix.client == 'sail' && 'sail_capability'
         || matrix.client == 'chdb' && 'chdb_capability' || 'catalog' }}.txt
       SCRIPT: >-
-        .github/scripts/catalog_capability${{ matrix.client == 'duckdb' && '_duckdb'
+        .github/scripts/${{ matrix.client == 'duckdb_isolation' && 'isolation_duckdb' || 'catalog_capability' }}${{ matrix.client == 'duckdb' && '_duckdb'
         || matrix.client == 'sail' && '_sail'
         || matrix.client == 'chdb' && '_chdb' || '' }}.py
     steps:
