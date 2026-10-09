@@ -141,7 +141,7 @@ ROWS = [
     # DuckDB's cells are its isolation run's, at Iceberg's default level.
     ("Concurrent append: both kept", {e: ["race_append"] for e in ENGINES}),
     (
-        "Concurrent writer: INSERT ... SELECT not committed from a stale read",
+        "INSERT ... SELECT racing a writer: no stale row",
         {e: ["race_read_write"] for e in ENGINES},
     ),
     ("Concurrent writer: DELETE loses nothing", {e: ["race_delete"] for e in SQL}),

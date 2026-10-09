@@ -97,6 +97,5 @@ def test_duckdb_isolation_rows_fill_the_duckdb_column():
     lines = text.splitlines()
     assert "| Concurrent append: both kept | — | yes |" in lines
     assert any(
-        ln.startswith("| Concurrent writer: INSERT ... SELECT") and "| — | no " in ln
-        for ln in lines
+        ln.startswith("| INSERT ... SELECT racing a writer") and "| — | no " in ln for ln in lines
     )
