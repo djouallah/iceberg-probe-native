@@ -1,0 +1,355 @@
+"""Write readme.md from the probe results in results/*.json.
+
+Everything in the readme is generated from the latest reading of each engine, except the section
+between the `blocked` markers ("Blocked by the OneLake catalog"), which is handwritten and copied
+over verbatim. CI runs this after the probes and commits the readme together with results/.
+
+A results file is what one probe script saved (Report.save, or isolation_duckdb's own): the
+engine, its version, the CI run, the date, and one row per probe with the probe's method name
+as `key`. A row of the capability table names, per engine, the probe keys it is read from: yes
+only if every one of them is yes, otherwise the worst outcome, with a note quoting what came back.
+
+    python .github/scripts/render_readme.py [results-dir] [readme]
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ENGINES = ("pyiceberg", "duckdb", "sail")
+TITLE = {"pyiceberg": "pyiceberg", "duckdb": "DuckDB", "sail": "Sail"}
+LANGUAGE = {"pyiceberg": "Python", "duckdb": "C++", "sail": "Rust"}
+IMPLEMENTATION = {
+    "pyiceberg": "own, pyarrow for the files",
+    "duckdb": "own",
+    "sail": "own, on DataFusion",
+}
+
+BLOCKED_START = "<!-- blocked:start -->"
+BLOCKED_END = "<!-- blocked:end -->"
+
+# (row label, {engine: probe keys}); an engine missing from the dict has no such operation.
+ROWS = [
+    (
+        "CREATE TABLE",
+        {"pyiceberg": ["create_table"], "duckdb": ["create_table"], "sail": ["create_table"]},
+    ),
+    (
+        "INSERT / append",
+        {"pyiceberg": ["append"], "duckdb": ["insert_values"], "sail": ["insert_into"]},
+    ),
+    ("INSERT ... SELECT", {"duckdb": ["insert_select"]}),
+    (
+        "DELETE",
+        {
+            "pyiceberg": ["delete_whole_file", "delete_partial_file"],
+            "duckdb": ["delete_from"],
+            "sail": ["delete_from"],
+        },
+    ),
+    ("UPDATE", {"duckdb": ["update"], "sail": ["update"]}),
+    (
+        "MERGE INTO / upsert",
+        {"pyiceberg": ["upsert"], "duckdb": ["merge_into"], "sail": ["merge_into"]},
+    ),
+    (
+        "MERGE with one action",
+        {
+            "duckdb": [
+                "merge_update_only",
+                "merge_delete_only",
+                "merge_insert_only",
+                "merge_by_source_only",
+            ]
+        },
+    ),
+    (
+        "MERGE ... WHEN NOT MATCHED BY SOURCE",
+        {"duckdb": ["merge_by_source"], "sail": ["merge_by_source"]},
+    ),
+    (
+        "INSERT OVERWRITE, whole table",
+        {
+            "pyiceberg": ["overwrite_whole"],
+            "duckdb": ["insert_overwrite"],
+            "sail": ["insert_overwrite"],
+        },
+    ),
+    (
+        "INSERT OVERWRITE, one partition / by filter",
+        {
+            "pyiceberg": ["overwrite_filtered"],
+            "duckdb": ["overwrite_partition"],
+            "sail": ["overwrite_partition"],
+        },
+    ),
+    (
+        "Several writes in one transaction",
+        {"duckdb": ["txn_two_inserts", "txn_update_insert", "txn_two_updates"]},
+    ),
+    ("TRUNCATE", {"duckdb": ["truncate"], "sail": ["truncate"]}),
+    ("CREATE TABLE AS SELECT", {"duckdb": ["ctas"], "sail": ["ctas"]}),
+    (
+        "CREATE OR REPLACE TABLE",
+        {
+            "duckdb": ["create_or_replace", "create_or_replace_as_select"],
+            "sail": ["create_or_replace"],
+        },
+    ),
+    (
+        "Partitioned table",
+        {
+            "pyiceberg": ["create_partitioned"],
+            "duckdb": ["create_partitioned"],
+            "sail": ["partitioned"],
+        },
+    ),
+    ("Partition transform: bucket", {e: ["partition_bucket"] for e in ENGINES}),
+    ("Partition transform: truncate", {e: ["partition_truncate"] for e in ENGINES}),
+    (
+        "Partition transforms: year / month / day / hour",
+        {e: ["partition_temporal"] for e in ENGINES},
+    ),
+    (
+        "Types: decimal, date, timestamp, timestamptz, uuid, binary",
+        {e: ["types_scalar"] for e in ENGINES},
+    ),
+    ("Nested types: struct, list, map", {e: ["types_nested"] for e in ENGINES}),
+    (
+        "format-version 3",
+        {"pyiceberg": ["create_v3"], "duckdb": ["format_v3"], "sail": ["format_v3"]},
+    ),
+    ("Add column", {e: ["add_column"] for e in ENGINES}),
+    ("Drop column", {e: ["drop_column"] for e in ENGINES}),
+    ("Rename column", {e: ["rename_column"] for e in ENGINES}),
+    ("Type promotion (int → long)", {e: ["type_promotion"] for e in ENGINES}),
+    ("Partition evolution", {e: ["partition_evolution"] for e in ENGINES}),
+    (
+        "Write after partition evolution",
+        {"pyiceberg": ["write_after_evolution"], "duckdb": ["write_after_evolution"]},
+    ),
+    ("Set table property", {e: ["set_property"] for e in ENGINES}),
+    (
+        "Sort order at create",
+        {"pyiceberg": ["create_sorted"], "duckdb": ["create_sorted_at_create"]},
+    ),
+    (
+        "Sort order evolution",
+        {
+            "pyiceberg": ["sort_order_evolution"],
+            "duckdb": ["create_sorted"],
+            "sail": ["sort_order"],
+        },
+    ),
+    ("Time travel", {e: ["time_travel"] for e in ENGINES}),
+    (
+        "Metadata tables",
+        {
+            "pyiceberg": ["metadata_tables"],
+            "duckdb": ["metadata_snapshots", "metadata_files"],
+            "sail": ["metadata_tables"],
+        },
+    ),
+    ("Compaction", {"duckdb": ["rewrite_data_files"], "sail": ["rewrite_data_files"]}),
+    ("Expire snapshots", {e: ["expire_snapshots"] for e in ENGINES}),
+    ("Create branch", {e: ["create_branch"] for e in ENGINES}),
+    ("Create tag", {"pyiceberg": ["create_tag"], "sail": ["create_tag"]}),
+    (
+        "Drop table with purge",
+        {"pyiceberg": ["drop_purge"], "duckdb": ["drop_table"], "sail": ["drop_purge"]},
+    ),
+    (
+        "Create / drop namespace",
+        {
+            "pyiceberg": ["create_namespace"],
+            "duckdb": ["create_schema", "drop_schema"],
+            "sail": ["namespace"],
+        },
+    ),
+    ("Credential vending", {"pyiceberg": ["vended_only"], "duckdb": ["credential_vending"]}),
+    ("A commit against a stale snapshot is refused", {"pyiceberg": ["stale_assertion"]}),
+]
+
+# Worst first: the cell shows the worst outcome among the row's probes.
+SEVERITY = ["broken", "no", "no-op", "skipped", "supported"]
+MARK = {"supported": "yes", "no": "no", "no-op": "no-op", "skipped": "—", "broken": "?"}
+SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def load(results: Path) -> dict:
+    found = {}
+    for path in sorted(results.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        found[data["engine"]] = data
+    return found
+
+
+def cell(rows: dict, keys: list[str]) -> tuple[str, list[dict]]:
+    """(outcome, the rows that made it not a yes) for one engine's probes of one table row."""
+    picked = [rows[k] for k in keys if k in rows]
+    if not picked:
+        return "skipped", []
+    worst = min(picked, key=lambda r: SEVERITY.index(r["outcome"]))["outcome"]
+    return worst, [r for r in picked if r["outcome"] != "supported"]
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    flat = " ".join(str(text).split()).replace("|", "/")
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def capability(data: dict) -> tuple[list[str], list[str]]:
+    engines = [e for e in ENGINES if e in data]
+    by_key = {e: {r["key"]: r for r in data[e]["rows"]} for e in engines}
+    head = ["| Operation | " + " | ".join(TITLE[e] for e in engines) + " |"]
+    head.append("|---|" + "---|" * len(engines))
+    head.append("| Version | " + " | ".join(data[e]["version"] for e in engines) + " |")
+    head.append("| Language | " + " | ".join(LANGUAGE[e] for e in engines) + " |")
+    head.append(
+        "| Iceberg implementation | " + " | ".join(IMPLEMENTATION[e] for e in engines) + " |"
+    )
+    notes: list[str] = []
+    for label, sources in ROWS:
+        cells = []
+        for e in engines:
+            if e not in sources:
+                cells.append("na")
+                continue
+            outcome, why = cell(by_key[e], sources[e])
+            mark = MARK[outcome]
+            if why and outcome != "skipped":
+                notes.append(
+                    f"{TITLE[e]}, {label}: "
+                    + "; ".join(f"{r['question']}: `{_one_line(r['detail'])}`" for r in why)
+                )
+                mark += " " + str(len(notes)).translate(SUPERSCRIPT)
+            cells.append(mark)
+        head.append(f"| {label} | " + " | ".join(cells) + " |")
+    return head, [f"{i}. {n}" for i, n in enumerate(notes, 1)]
+
+
+LEVEL_TITLES = {
+    "insert": "INSERT, B appends",
+    "insert_select": "`INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, B appends",
+    "delete": "DELETE a row, B appends",
+    "update_other": "UPDATE another row, B appends",
+    "merge_other": "MERGE on another row, B appends",
+    "delete_vs_delete": "DELETE a row, B deletes another row",
+    "update_same": "UPDATE the row B updated",
+    "merge_same": "MERGE on the row B updated",
+    "overwrite": "Overwrite (DELETE + INSERT in one transaction), B appends",
+}
+
+
+def isolation(data: dict) -> list[str]:
+    iso = data.get("duckdb_isolation")
+    if not iso:
+        return []
+    levels = iso["levels"]
+    names = list(iso["configs"])
+    out = [
+        "## DuckDB: isolation levels and transactions",
+        "",
+        "DuckDB is the only one with transactions. Writer B (pyiceberg) commits between DuckDB's",
+        "read and DuckDB's commit; the race is injected at the REST commit through a local proxy",
+        "(`bench/race.py`), so it is deterministic. Every DuckDB connection runs",
+        "`SET iceberg_use_metadata_log = false`",
+        "([duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475)).",
+        "",
+        "`refused` DuckDB's commit fails and B's change stands · `retried` both changes kept ·",
+        "`skew` a row computed from a stale read is committed beside B's ·",
+        "`lost` B's change is gone · `broken` the race could not be run",
+        "",
+        "| DuckDB writes, B commits in between | " + " | ".join(names) + " |",
+        "|---|" + "---|" * len(names),
+    ]
+    for key, title in LEVEL_TITLES.items():
+        cells = [levels.get(f"{key}/{n}", {}).get("outcome", "—") for n in names]
+        if any(c != "—" for c in cells):
+            out.append(f"| {title} | " + " | ".join(cells) + " |")
+    out += [
+        "",
+        "Columns are table properties: "
+        + "; ".join(
+            f"`{n}` " + (", ".join(f"`{k} = {v}`" for k, v in p.items()) or "nothing set")
+            for n, p in iso["configs"].items()
+        )
+        + ".",
+        "",
+        "| Transaction (`BEGIN ... COMMIT`), B commits in the middle | Outcome | What came back |",
+        "|---|---|---|",
+    ]
+    out += [
+        f"| {t['title']} | {t['outcome']} | `{_one_line(t['detail'], 200)}` |"
+        for t in iso["transactions"]
+    ]
+    out += [
+        "",
+        "| Statements in one `BEGIN ... COMMIT`, no concurrent writer | Outcome | What came back |",
+        "|---|---|---|",
+    ]
+    out += [
+        f"| {c['title']} | {c['outcome']} | `{_one_line(c['detail'], 200)}` |"
+        for c in iso["combos"]
+    ]
+    return out + [""]
+
+
+def blocked(readme: str) -> list[str]:
+    if BLOCKED_START not in readme or BLOCKED_END not in readme:
+        raise SystemExit(f"readme has no {BLOCKED_START} ... {BLOCKED_END} section to keep")
+    body = readme.split(BLOCKED_START, 1)[1].split(BLOCKED_END, 1)[0].strip("\n")
+    return [BLOCKED_START, body, BLOCKED_END]
+
+
+def provenance(data: dict) -> list[str]:
+    lines = [
+        "## Where these readings come from",
+        "",
+        "The OneLake Iceberg REST catalog in production, read by CI "
+        "(`.github/workflows/capability.yml`), which writes this file. Every cell is a reading "
+        "taken by sending the request, not a property of the product: re-run rather than trust it.",
+        "",
+    ]
+    for name in (*ENGINES, "duckdb_isolation"):
+        if name in data:
+            d = data[name]
+            lines.append(f"- {name}: {d['version']}, run {d['run']}, {d['date']}")
+    return lines + [""]
+
+
+def render(data: dict, readme: str) -> str:
+    table, notes = capability(data)
+    out = [
+        "# OneLake Iceberg REST catalog: what the native engines can do",
+        "",
+        "pyiceberg, DuckDB and Sail: engines with their own Iceberg implementation, no JVM.",
+        "",
+        "`yes` works · `no` refused · `no-op` accepted but not applied · `na` the engine has no "
+        "such operation · `—` not probed · `?` the probe could not ask",
+        "",
+        *table,
+        "",
+        *blocked(readme),
+        "",
+    ]
+    if notes:
+        out += ["## Notes", "", *notes, ""]
+    out += isolation(data)
+    out += provenance(data)
+    return "\n".join(out)
+
+
+def main() -> int:
+    results = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    path = Path(sys.argv[2] if len(sys.argv) > 2 else "readme.md")
+    text = render(load(results), path.read_text(encoding="utf-8"))
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {path} from {', '.join(sorted(load(results)))}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -69,6 +69,8 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       CAPABILITY_KEEP: ${{ inputs.keep && '1' || '0' }}
+      # Each probe's readings as JSON, for render_readme.py in the readme job below.
+      RESULTS_FILE: results/${{ matrix.client }}.json
       REQS: >-
         requirements/${{ (matrix.client == 'duckdb' || matrix.client == 'duckdb_isolation') && 'duckdb_capability'
         || matrix.client == 'sail' && 'sail_capability'
@@ -114,5 +116,40 @@ jobs:
         if: always()
         with:
           name: capability-${{ matrix.client }}
-          path: capability-${{ matrix.client }}.log
+          path: |
+            capability-${{ matrix.client }}.log
+            results/${{ matrix.client }}.json
           if-no-files-found: warn
+
+  # THE README IS WRITTEN FROM THE READINGS, except the handwritten "Blocked by the OneLake
+  # catalog" section between its markers. results/ keeps each engine's latest reading, so a run
+  # that asks one client leaves the others' cells as they were.
+  readme:
+    needs: ask
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: capability-*
+          path: artifacts
+          merge-multiple: true
+      - name: Write readme.md from the readings
+        shell: bash
+        run: |
+          mkdir -p results
+          cp artifacts/results/*.json results/ 2>/dev/null || true
+          python3 .github/scripts/render_readme.py results readme.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add readme.md results
+          if git diff --cached --quiet; then echo "readme unchanged"; exit 0; fi
+          git commit -m "readme: readings from run ${{ github.run_id }}"
+          git pull --rebase origin main
+          git push origin HEAD:main

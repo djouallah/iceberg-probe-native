@@ -49,6 +49,7 @@ operation · `—` not probed
 | Create tag | yes | na | na | na |
 | Write to a branch | yes | na | na | na |
 
+<!-- blocked:start -->
 ## Blocked by the OneLake catalog
 
 The catalog itself refuses or ignores these, so no engine can do them.
@@ -67,6 +68,7 @@ The catalog itself refuses or ignores these, so no engine can do them.
 | Update namespace properties | no: `405` |
 | Server-side scan planning | no: not declared in `/v1/config` |
 | Views | no |
+<!-- blocked:end -->
 
 ## Notes
 

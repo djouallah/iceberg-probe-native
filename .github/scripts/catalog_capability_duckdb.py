@@ -985,6 +985,7 @@ def main() -> int:
         f"{counts[SKIPPED]} skipped, {counts[BROKEN]} could not be asked"
     )
     write_step_summary(probe)
+    probe.report.save("duckdb", probe.version)
     return 0
 
 

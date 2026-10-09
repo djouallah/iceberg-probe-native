@@ -169,6 +169,23 @@ def _is_server_refusal(message: str) -> bool:
     return any(mark in lowered for mark in marks)
 
 
+def save_results(payload: dict) -> None:
+    """Write a probe's readings to $RESULTS_FILE as JSON, for render_readme.py. No-op without it."""
+    import datetime as dt
+
+    path = os.environ.get("RESULTS_FILE")
+    if not path:
+        return
+    payload = {
+        **payload,
+        "run": os.environ.get("GITHUB_RUN_ID", "local"),
+        "date": dt.datetime.now(dt.UTC).strftime("%Y-%m-%d"),
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=1, default=str)
+
+
 class Report:
     def __init__(self, reason=None) -> None:
         self.rows: list[dict] = []
@@ -177,9 +194,12 @@ class Report:
         # engine probes pass their own, so each engine's error reaches the log in its own words.
         self._reason = reason or (lambda exc: scrub.scrub_exc(exc, 600))
 
-    def record(self, group: str, question: str, outcome: str, detail: object) -> None:
+    def record(
+        self, group: str, question: str, outcome: str, detail: object, key: str = ""
+    ) -> None:
         self.rows.append(
             {
+                "key": key,
                 "group": group,
                 "question": question,
                 "outcome": outcome,
@@ -187,20 +207,25 @@ class Report:
             }
         )
 
+    def save(self, engine: str, version: str) -> None:
+        """The rows, for render_readme.py: see save_results."""
+        save_results({"engine": engine, "version": version, "rows": self.rows})
+
     def run(self, group: str, question: str, fn) -> bool:
         print(f"\n[{len(self.rows) + 1:>2}] {group}: {question}", flush=True)
+        key = getattr(fn, "__name__", "")
         try:
             detail = fn() or ""
         except Skip as skip:
-            self.record(group, question, SKIPPED, skip)
+            self.record(group, question, SKIPPED, skip, key)
             print(f"     skip       {scrub.scrub(skip)}", flush=True)
             return False
         except Refused as refused:
-            self.record(group, question, REFUSED, refused)
+            self.record(group, question, REFUSED, refused, key)
             print(f"     no         {scrub.scrub(refused)}", flush=True)
             return False
         except NoOp as noop:
-            self.record(group, question, NOOP, noop)
+            self.record(group, question, NOOP, noop, key)
             print(f"     no-op      {scrub.scrub(noop)}", flush=True)
             return False
         except Exception as exc:  # noqa: BLE001 - reporting the failure is the job
@@ -208,10 +233,10 @@ class Report:
             # A client-side exception is usually still the endpoint talking back through the
             # client, so the status code in the message decides which it was.
             outcome = REFUSED if _is_server_refusal(message) else BROKEN
-            self.record(group, question, outcome, message)
+            self.record(group, question, outcome, message, key)
             print(f"     {outcome:<10} {message}", flush=True)
             return False
-        self.record(group, question, SUPPORTED, detail)
+        self.record(group, question, SUPPORTED, detail, key)
         print(f"     supported  {scrub.scrub(detail)}", flush=True)
         return True
 
@@ -1275,6 +1300,7 @@ def main() -> int:
         f"{counts[SKIPPED]} skipped, {counts[BROKEN]} could not be asked"
     )
     write_step_summary(probe)
+    probe.report.save("pyiceberg", _pyiceberg_version())
     # A refusal is a finding, not a failure: this script answers questions, it does not gate.
     return 0
 

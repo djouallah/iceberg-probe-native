@@ -44,7 +44,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from catalog_capability import NAMESPACE, iceberg_schema, rows
+from catalog_capability import NAMESPACE, iceberg_schema, rows, save_results
 
 from bench import auth, scrub
 from bench.config import Config
@@ -883,6 +883,26 @@ def main() -> int:
         finally:
             probe.proxy.close()
 
+    titles = {key: title for key, title, _ in TRANSACTIONS}
+    save_results(
+        {
+            "engine": "duckdb_isolation",
+            "version": probe.version,
+            "configs": CONFIGS,
+            "levels": {
+                f"{key}/{level}": {"outcome": outcome, "detail": detail}
+                for (key, level), (outcome, detail) in probe.levels.items()
+            },
+            "transactions": [
+                {"key": key, "title": titles[key], "outcome": outcome, "detail": detail}
+                for key, outcome, detail in probe.transactions
+            ],
+            "combos": [
+                {"key": key, "title": title, "outcome": outcome, "detail": detail}
+                for key, title, outcome, detail in probe.combos
+            ],
+        }
+    )
     if probe.levels:
         _say("\n| DuckDB writes, B commits in between | " + " | ".join(levels) + " |")
         _say("|---|" + "---|" * len(levels))
