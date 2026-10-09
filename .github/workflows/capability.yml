@@ -17,6 +17,7 @@ on:
           - sail
           - chdb
           - duckdb_isolation
+          - duckdb,duckdb_isolation
         default: pyiceberg,duckdb,sail,chdb,duckdb_isolation
       keep:
         description: Leave the probe tables behind, to inspect them in Fabric.
