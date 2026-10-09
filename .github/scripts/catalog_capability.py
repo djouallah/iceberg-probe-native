@@ -11,7 +11,7 @@ IT IS NOT A BENCHMARK. Nothing is timed, and a probe that comes back `no` does n
 The only non-zero exit is a credential failure, because then nothing was read at all.
 
 pyiceberg AND PLAIN HTTP, NO ENGINES. An answer from pyiceberg alone is a fact about pyiceberg
-until DuckDB or Sail confirms it.
+until DuckDB, Sail or chDB confirms it.
 
 THE ENDPOINT DECLARES ITS OWN SURFACE. /v1/config comes back with an `endpoints` list -- the REST
 spec's way for a server to say what it implements. It is the place to look first, but not the last

@@ -11,13 +11,14 @@ on:
         description: Which clients to ask.
         type: choice
         options:
-          - pyiceberg,duckdb,sail,duckdb_isolation
+          - pyiceberg,duckdb,sail,chdb,duckdb_isolation
           - pyiceberg
           - duckdb
           - sail
+          - chdb
           - duckdb_isolation
           - duckdb,duckdb_isolation
-        default: pyiceberg,duckdb,sail,duckdb_isolation
+        default: pyiceberg,duckdb,sail,chdb,duckdb_isolation
       keep:
         description: Leave the probe tables behind, to inspect them in Fabric.
         type: boolean
@@ -36,7 +37,7 @@ jobs:
     steps:
       - id: plan
         run: |
-          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,duckdb_isolation' }}" \
+          CLIENTS=$(printf '%s' "${{ inputs.clients || 'pyiceberg,duckdb,sail,chdb,duckdb_isolation' }}" \
             | jq -Rc 'split(",") | map(sub("^\\s+";"") | sub("\\s+$";"")) | map(select(length > 0))')
           echo "clients=$CLIENTS" >> "$GITHUB_OUTPUT"
           echo "clients: $CLIENTS"
@@ -47,6 +48,7 @@ jobs:
       ${{ matrix.client == 'duckdb' && '🦆 DuckDB (pre-release)'
       || matrix.client == 'pyiceberg' && '🧊 pyiceberg'
       || matrix.client == 'sail' && '⛵ Sail'
+      || matrix.client == 'chdb' && '🐭 chDB'
       || matrix.client == 'duckdb_isolation' && '🦆 DuckDB isolation and transactions'
       || matrix.client }}
     runs-on: ubuntu-latest
@@ -72,10 +74,12 @@ jobs:
       RESULTS_FILE: results/${{ matrix.client }}.json
       REQS: >-
         requirements/${{ (matrix.client == 'duckdb' || matrix.client == 'duckdb_isolation') && 'duckdb_capability'
-        || matrix.client == 'sail' && 'sail_capability' || 'catalog' }}.txt
+        || matrix.client == 'sail' && 'sail_capability'
+        || matrix.client == 'chdb' && 'chdb_capability' || 'catalog' }}.txt
       SCRIPT: >-
         .github/scripts/${{ matrix.client == 'duckdb_isolation' && 'isolation_duckdb' || 'catalog_capability' }}${{ matrix.client == 'duckdb' && '_duckdb'
-        || matrix.client == 'sail' && '_sail' || '' }}.py
+        || matrix.client == 'sail' && '_sail'
+        || matrix.client == 'chdb' && '_chdb' || '' }}.py
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -89,7 +93,7 @@ jobs:
       - name: Install ${{ matrix.client }}
         run: |
           pip install -r "$REQS"
-          pip list --format=freeze | grep -Ei '^(pyiceberg|pyarrow|duckdb|pysail)=' || true
+          pip list --format=freeze | grep -Ei '^(pyiceberg|pyarrow|duckdb|pysail|chdb)=' || true
 
       # DuckDB is the nightly CLI, not a wheel: bench/duckdb_cli.py says why, and
       # .github/scripts/duckdb_nightly.py picks the newest nightly whose extensions are published.

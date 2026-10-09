@@ -19,13 +19,14 @@ import re
 import sys
 from pathlib import Path
 
-ENGINES = ("pyiceberg", "duckdb", "sail")
-TITLE = {"pyiceberg": "pyiceberg", "duckdb": "DuckDB", "sail": "Sail"}
-LANGUAGE = {"pyiceberg": "Python", "duckdb": "C++", "sail": "Rust"}
+ENGINES = ("pyiceberg", "duckdb", "sail", "chdb")
+TITLE = {"pyiceberg": "pyiceberg", "duckdb": "DuckDB", "sail": "Sail", "chdb": "chDB"}
+LANGUAGE = {"pyiceberg": "Python", "duckdb": "C++", "sail": "Rust", "chdb": "C++"}
 IMPLEMENTATION = {
     "pyiceberg": "own, pyarrow for the files",
     "duckdb": "own",
     "sail": "own, on DataFusion",
+    "chdb": "ClickHouse's own",
 }
 
 BLOCKED_START = "<!-- blocked:start -->"
@@ -172,6 +173,32 @@ ROWS = [
     ("Credential vending", {"pyiceberg": ["vended_only"], "duckdb": ["credential_vending"]}),
     ("A commit against a stale snapshot is refused", {"pyiceberg": ["stale_assertion"]}),
 ]
+
+# chDB's probe keys where they differ from the row's shared name; the rows built over ENGINES
+# already ask chDB the shared one. chDB's UPDATE is `ALTER TABLE ... UPDATE`.
+CHDB = {
+    "CREATE TABLE": ["create_table"],
+    "INSERT / append": ["insert_into"],
+    "INSERT ... SELECT": ["insert_select"],
+    "DELETE": ["delete_from", "alter_delete"],
+    "UPDATE": ["alter_update"],
+    "MERGE INTO / upsert": ["merge_into"],
+    "MERGE ... WHEN NOT MATCHED BY SOURCE": ["merge_by_source"],
+    "INSERT OVERWRITE, whole table": ["insert_overwrite"],
+    "INSERT OVERWRITE, one partition / by filter": ["overwrite_partition"],
+    "TRUNCATE": ["truncate"],
+    "CREATE TABLE AS SELECT": ["ctas"],
+    "Partitioned table": ["partitioned"],
+    "Sort order at create": ["sorted_at_create"],
+    "Sort order evolution": ["sort_order_evolution"],
+    "Metadata tables": ["metadata_tables"],
+    "Compaction": ["compaction"],
+    "Create tag": ["create_tag"],
+    "Drop table with purge": ["drop_table"],
+}
+for _label, _sources in ROWS:
+    if _label in CHDB:
+        _sources["chdb"] = CHDB[_label]
 
 # Worst first: the cell shows the worst outcome among the row's probes.
 SEVERITY = ["broken", "no", "no-op", "skipped", "supported"]
