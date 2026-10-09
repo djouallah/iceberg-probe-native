@@ -57,35 +57,15 @@ The catalog itself refuses or ignores these, so no engine can do them.
 | Operation | Catalog |
 |---|---|
 | Staged create (`stage-create: true`) | no: `400 Malformed request` |
-| Rename table | no: `406` |
+| More than one snapshot in one commit (MERGE with two actions, overwrite, a transaction with more than one write) | no: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot` |
+| Roll back to a snapshot | no-op: `refs.main` moves, `current-snapshot-id` does not |
+| Rename table | no: `501 The Iceberg rename table operation is not supported.` |
 | Drop table without purge (`purgeRequested=false`) | no: `405` |
 | registerTable | no: not declared in `/v1/config` |
 | Multi-table transactions | no: `405` |
 | Update namespace properties | no: `405` |
 | Server-side scan planning | no: not declared in `/v1/config` |
 | Views | no |
-
-## Production
-
-Everything above was read on the preview. The CI job reaches the production catalog
-(`onelake.table.fabric.microsoft.com`). It was read with DuckDB only, on 2026-10-09 (CI run
-37887963429), using DuckDB 2.0.0.dev2610011535 and its iceberg extension `5b9ff899a1`. Where
-production differs from the DuckDB column:
-
-| Operation | Production |
-|---|---|
-| A commit carrying more than one snapshot | no: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot` |
-| MERGE with one action: matched UPDATE, matched DELETE, not-matched INSERT, or by-source DELETE | yes, one snapshot |
-| MERGE with two actions: UPDATE + INSERT, DELETE + INSERT, INSERT + by-source DELETE | no: two snapshots, the `400` above |
-| Overwrite, whole table or one partition (DELETE + INSERT in one transaction) | no: the `400` above |
-| A transaction with more than one write (INSERT + INSERT, UPDATE + INSERT, ...) | no: the `400` above |
-| Roll back to a snapshot | no-op: `refs.main` moves, `current-snapshot-id` does not |
-| Rename table | no: `501 The Iceberg rename table operation is not supported.` |
-
-Everything else in the DuckDB column reads the same in production. The preview accepts a
-commit with several snapshots: the same MERGE and transaction shapes, run with the DuckDB CLI
-on 2026-10-09, all commit there. So the DuckDB transaction section below holds on the preview,
-and in production only for transactions with a single write.
 
 ## Notes
 
