@@ -148,12 +148,10 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 
 | Transaction (`BEGIN ... COMMIT`), B commits in the middle | Outcome | What came back |
 |---|---|---|
-| BEGIN; read; B appends; read again | broken | `CommitStateUnknownException: CommitStateUnknownException: CommitStateUnknownException: An unknown server-side problem occurred; the commit state is unknown` |
+| BEGIN; read; B appends; read again | repeatable | `reads 3, B appends, reads 3; COMMIT ok` |
 | B commits after BEGIN, before the first read | at first read | `BEGIN, B appends, the first read sees 4 rows; B appends again, the next read sees 4` |
 | read v, B changes it, UPDATE v + 1, COMMIT | broken | `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref` |
-| read count, B appends, INSERT the count, COMMIT | skew | `reads count 3, B appends, INSERT (100, count); COMMIT ok; commits [409, 200]; [(1, 10), (2, 20), (3, 30), (4, 40), (100, 3)]` |
-| the same on a commit.retry.num-retries = 0 table | refused | `reads count 3, B appends, INSERT (100, count); COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/…` |
-| INSERT + UPDATE + DELETE in one transaction | broken | `INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned …` |
+| INSERT + UPDATE + DELETE in one transaction | broken | `INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned …` |
 | INSERT + DELETE, then ROLLBACK | nothing sent | `INSERT + DELETE, ROLLBACK; commits [none]; [(1, 10), (2, 20), (3, 30)]` |
 | a failing statement inside the transaction | all rolled back | `INSERT ok, then INSERT failed (RuntimeError: RuntimeError: Conversion Error: Could not convert string 'not a number' to …); COMMIT ok; [(1, 10), (2, 20), (3, 30)]` |
 | own uncommitted rows, inside and from another connection | yes | `uncommitted INSERT: this transaction reads 4, another connection 3; COMMIT ok; catalog 4 rows` |
@@ -162,9 +160,9 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 
 | Statements in one `BEGIN ... COMMIT`, no concurrent writer | Outcome | What came back |
 |---|---|---|
-| TRUNCATE, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| DELETE all, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| DROP TABLE, CREATE TABLE the same name with a new column, INSERT | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37949375865_1_cb_drop_create; t (('id', 'v'), [(1…` |
+| TRUNCATE, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| DELETE all, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| DROP TABLE, CREATE TABLE the same name with a new column, INSERT | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37953552712_1_cb_drop_create; t (('id', 'v'), [(1…` |
 | CREATE a copy AS SELECT, DROP TABLE, CREATE TABLE the same name AS SELECT from the copy | PARTIAL | `DROP refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it mixes table updates with rename/drop requests; t (('id', …` |
 | CREATE OR REPLACE TABLE t AS SELECT ... FROM t | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements; t (('id', 'v'), [(1, 10), (2, 20)…` |
 | CREATE TABLE, INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 1)]); sent ['POST tables 200', 'POST n 200']` |
@@ -175,14 +173,14 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 | RENAME COLUMN, INSERT | works | `t (('id', 'v2'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']` |
 | DROP COLUMN, INSERT | works | `t (('id',), [(1,), (2,), (3,), (4,)]); n None; sent ['POST t 200']` |
 | SET PARTITIONED BY (bucket(4, id)), INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']; spec ['bucket[4]']` |
-| INSERT, UPDATE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| INSERT, DELETE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| UPDATE a row, then DELETE it | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| MERGE, then MERGE the same row again | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
-| INSERT ... SELECT from the table, DELETE the originals | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| INSERT, UPDATE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| INSERT, DELETE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| UPDATE a row, then DELETE it | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| MERGE, then MERGE the same row again | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
+| INSERT ... SELECT from the table, DELETE the originals | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:44139/iceberg/v1' returned a non-200 status …` |
 | TRUNCATE, INSERT, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
 | DROP TABLE, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
-| DROP TABLE, CREATE TABLE the same name, ROLLBACK | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37949375865_1_cb_drop_create_rollback; t (('id', …` |
+| DROP TABLE, CREATE TABLE the same name, ROLLBACK | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37953552712_1_cb_drop_create_rollback; t (('id', …` |
 | CREATE TABLE, INSERT, ROLLBACK | WRONG | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']; expected t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]), n None` |
 
 ## Where these readings come from
@@ -193,4 +191,4 @@ The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/c
 - duckdb: v2.0.0-alpha46057, run 37949375865, 2026-10-09
 - sail: 0.7.2, run 37952652391, 2026-10-09
 - chdb: 4.4.0, run 37949375865, 2026-10-09
-- duckdb_isolation: v2.0.0-alpha46057, run 37949375865, 2026-10-09
+- duckdb_isolation: v2.0.0-alpha46057, run 37953552712, 2026-10-09
