@@ -49,10 +49,9 @@ Polars, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no
 | Create / drop namespace | na | yes | yes | na |
 | Credential vending | na | yes | na | na |
 | A commit against a stale snapshot is refused | yes | na | na | na |
-| Concurrent append: both kept | yes | yes | — | yes |
-| INSERT ... SELECT racing a writer: no stale row | no ⁴⁶ | no ⁴⁷ | — | no ⁴⁸ |
-| Concurrent writer: DELETE loses nothing | na | yes | — | yes |
-| Concurrent writer: UPDATE loses nothing | na | yes | — | yes |
+| Concurrent append: both kept | yes | yes | yes | yes |
+| Concurrent writer: DELETE loses nothing | na | yes | yes | yes |
+| Concurrent writer: UPDATE loses nothing | na | yes | yes | yes |
 
 <!-- blocked:start -->
 ## Blocked by the OneLake catalog
@@ -102,14 +101,14 @@ The catalog itself refuses or ignores these, so no engine can do them.
 23. Sail, Add column: ALTER TABLE ADD COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
 24. Sail, Drop column: ALTER TABLE DROP COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
 25. Sail, Rename column: ALTER TABLE RENAME COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
-26. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_promote`
+26. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_promote`
 27. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
 28. chDB, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 70 (PARTITION): PARTITION FIELD bucket(4, id). Expected one of: COLUMN, INDEX, STATISTICS, PROJECTION, CONSTRAINT, end of query. (SYNTAX_ERROR)`
-29. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_props`
+29. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_props`
 30. chDB, Set table property: ALTER TABLE SET TBLPROPERTIES: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 64 (SET): SET TBLPROPERTIES ('probed-at' = '37949375865_1'). Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED P…`
 31. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 32. chDB, Sort order evolution: ALTER TABLE MODIFY ORDER BY (sort order evolution): `ChdbError: Code: 48. DB::Exception: Alter of type 'MODIFY_ORDER_BY' is not supported by Iceberg storage. (NOT_IMPLEMENTED)`
-33. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37930015241_1_inspect"), Identifier("snapshots")]`
+33. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37952652391_1_inspect"), Identifier("snapshots")]`
 34. chDB, Metadata tables: metadata (system.iceberg_history): `400 Malformed request`
 35. Sail, Compaction: CALL system.rewrite_data_files (compaction): `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
 36. chDB, Compaction: OPTIMIZE TABLE (compaction): `returned success and data files went 2 -> 2`
@@ -122,9 +121,6 @@ The catalog itself refuses or ignores these, so no engine can do them.
 43. Sail, Create tag: ALTER TABLE ... CREATE TAG: `IllegalArgumentException: invalid argument: found CREATE at 63:69 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 44. chDB, Create tag: ALTER TABLE ... CREATE TAG: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 62 (CREATE): CREATE TAG probe_tag. Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED PARTITION, DROP DETACHED PA…`
 45. chDB, Drop table with purge: DROP TABLE (chDB sends purgeRequested=false): `ChdbError: Code: 736. DB::Exception: Failed to drop table DB::HTTPException: Received error from remote server https://onelake.table.fabric.microsoft.com/iceberg/v1/namespaces/_bench_capability/tables/ch_37949375865_1_droppable?purgeRequested=False. HTTP status code: 405 'Method Not Allowed', body …`
-46. Polars, INSERT ... SELECT racing a writer: no stale row: scan max(id) + 1, sum(v), sink it; B appends in between: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
-47. DuckDB, INSERT ... SELECT racing a writer: no stale row: INSERT INTO t SELECT max(id) + 1, sum(v) FROM t; B appends a row: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
-48. chDB, INSERT ... SELECT racing a writer: no stale row: INSERT INTO t SELECT max(id) + 1, sum(v); B appends: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
 
 ## DuckDB: isolation levels and transactions
 
@@ -135,13 +131,11 @@ read and DuckDB's commit; the race is injected at the REST commit through a loca
 ([duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475)).
 
 `refused` DuckDB's commit fails and B's change stands · `retried` both changes kept ·
-`skew` a row computed from a stale read is committed beside B's ·
 `lost` B's change is gone · `broken` the race could not be run
 
 | DuckDB writes, B commits in between | serializable | snapshot | no retries |
 |---|---|---|---|
 | INSERT, B appends | retried | retried | refused |
-| `INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, B appends | skew | skew | refused |
 | DELETE a row, B appends | refused | retried | refused |
 | UPDATE another row, B appends | refused | refused | refused |
 | MERGE on another row, B appends | refused | refused | refused |
@@ -197,6 +191,6 @@ The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/c
 
 - polars: 2.0.0, run 37949375865, 2026-10-09
 - duckdb: v2.0.0-alpha46057, run 37949375865, 2026-10-09
-- sail: 0.7.2, run 37930015241, 2026-10-09
+- sail: 0.7.2, run 37952652391, 2026-10-09
 - chdb: 4.4.0, run 37949375865, 2026-10-09
 - duckdb_isolation: v2.0.0-alpha46057, run 37949375865, 2026-10-09
