@@ -106,8 +106,22 @@
    "question": "is assert-ref-snapshot-id enforced on a Polars commit",
    "outcome": "supported",
    "detail": "enforced, declined with: CommitFailedException: CommitFailedException: CommitFailedException: One or more requirements failed. The client may retry."
+  },
+  {
+   "key": "race_append",
+   "group": "concurrency",
+   "question": "sink append; B appends between Polars' read and commit",
+   "outcome": "supported",
+   "detail": "retried: final [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]; commits [409, 200]"
+  },
+  {
+   "key": "race_read_write",
+   "group": "concurrency",
+   "question": "scan max(id) + 1, sum(v), sink it; B appends in between",
+   "outcome": "no",
+   "detail": "skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]"
   }
  ],
- "run": "37946047727",
+ "run": "37949375865",
  "date": "2026-10-09"
 }

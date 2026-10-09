@@ -49,6 +49,10 @@ Polars, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no
 | Create / drop namespace | na | yes | yes | na |
 | Credential vending | na | yes | na | na |
 | A commit against a stale snapshot is refused | yes | na | na | na |
+| Concurrent append: both kept | yes | yes | — | yes |
+| INSERT ... SELECT racing a writer: no stale row | no ⁴⁶ | no ⁴⁷ | — | no ⁴⁸ |
+| Concurrent writer: DELETE loses nothing | na | yes | — | yes |
+| Concurrent writer: UPDATE loses nothing | na | yes | — | yes |
 
 <!-- blocked:start -->
 ## Blocked by the OneLake catalog
@@ -75,15 +79,15 @@ The catalog itself refuses or ignores these, so no engine can do them.
 
 1. chDB, CREATE TABLE: CREATE TABLE: `ChdbError: Code: 79. DB::Exception: MergeTree storages require data path. (INCORRECT_FILE_NAME)`
 2. DuckDB, MERGE INTO / upsert: MERGE INTO: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-3. chDB, MERGE INTO / upsert: MERGE INTO: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37945065317_1_merge` t USING (SELECT * FROM values('id Int64, v Int64', (1, 777), (9, 90))) s ON t.id = s.id WHEN MATCHED THEN UPD... Expected end of query. (SYNTAX_ERROR)`
+3. chDB, MERGE INTO / upsert: MERGE INTO: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37949375865_1_merge` t USING (SELECT * FROM values('id Int64, v Int64', (1, 777), (9, 90))) s ON t.id = s.id WHEN MATCHED THEN UPD... Expected end of query. (SYNTAX_ERROR)`
 4. DuckDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-5. chDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37945065317_1_mergesrc` t USING (SELECT * FROM values('id Int64, v Int64', (1, 10), (9, 90))) s ON t.id = s.id WHEN NOT MATCHED TH... Expected end of query. (SYNTAX_ERROR)`
+5. chDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37949375865_1_mergesrc` t USING (SELECT * FROM values('id Int64, v Int64', (1, 10), (9, 90))) s ON t.id = s.id WHEN NOT MATCHED TH... Expected end of query. (SYNTAX_ERROR)`
 6. Polars, INSERT OVERWRITE, whole table: sink_iceberg(mode='overwrite'): `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref`
 7. DuckDB, INSERT OVERWRITE, whole table: overwrite: DELETE + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
-8. chDB, INSERT OVERWRITE, whole table: INSERT OVERWRITE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37945065317_1_overwrite` SELECT * FROM values('id Int64, v Int64', (1, 100), (2, 200)). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORD…`
+8. chDB, INSERT OVERWRITE, whole table: INSERT OVERWRITE: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37949375865_1_overwrite` SELECT * FROM values('id Int64, v Int64', (1, 100), (2, 200)). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORD…`
 9. DuckDB, INSERT OVERWRITE, one partition / by filter: one-partition overwrite: DELETE WHERE p + INSERT in one transaction: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
 10. Sail, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `UnsupportedOperationException: PARTITION for write`
-11. chDB, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37945065317_1_ovwpart` PARTITION (p = 'a') VALUES (9, 90). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, FETCH, …`
+11. chDB, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 18 (onelake): onelake.`_bench_capability.ch_37949375865_1_ovwpart` PARTITION (p = 'a') VALUES (9, 90). Expected one of: token, Comma, FROM, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, FETCH, …`
 12. DuckDB, Several writes in one transaction: transaction: INSERT + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + INSERT: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`; transaction: UPDATE + UPDATE: `Only one instance of each update type is allowed per request. Duplicate types: add-snapshot`
 13. Sail, TRUNCATE: TRUNCATE TABLE: `IllegalArgumentException: invalid argument: found TRUNCATE at 0:8 expected something else, ';', statement, or end of input`
 14. chDB, TRUNCATE: TRUNCATE TABLE: `ChdbError: Code: 48. DB::Exception: Truncate is not supported for data lake engine. (NOT_IMPLEMENTED)`
@@ -102,7 +106,7 @@ The catalog itself refuses or ignores these, so no engine can do them.
 27. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
 28. chDB, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 70 (PARTITION): PARTITION FIELD bucket(4, id). Expected one of: COLUMN, INDEX, STATISTICS, PROJECTION, CONSTRAINT, end of query. (SYNTAX_ERROR)`
 29. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_props`
-30. chDB, Set table property: ALTER TABLE SET TBLPROPERTIES: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 64 (SET): SET TBLPROPERTIES ('probed-at' = '37945065317_1'). Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED P…`
+30. chDB, Set table property: ALTER TABLE SET TBLPROPERTIES: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 64 (SET): SET TBLPROPERTIES ('probed-at' = '37949375865_1'). Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED P…`
 31. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 32. chDB, Sort order evolution: ALTER TABLE MODIFY ORDER BY (sort order evolution): `ChdbError: Code: 48. DB::Exception: Alter of type 'MODIFY_ORDER_BY' is not supported by Iceberg storage. (NOT_IMPLEMENTED)`
 33. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37930015241_1_inspect"), Identifier("snapshots")]`
@@ -112,12 +116,15 @@ The catalog itself refuses or ignores these, so no engine can do them.
 37. DuckDB, Expire snapshots: iceberg_expire_snapshots: `Catalog Error: Table Function with name iceberg_expire_snapshots does not exist! Did you mean "iceberg_snapshots"?`
 38. Sail, Expire snapshots: CALL system.expire_snapshots: `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
 39. chDB, Expire snapshots: ALTER TABLE ... EXECUTE expire_snapshots: `ChdbError: Code: 48. DB::Exception: expire_snapshots is not supported for Iceberg tables backed by a transactional catalog. (NOT_IMPLEMENTED)`
-40. DuckDB, Create branch: ALTER TABLE ... CREATE BRANCH: `Parser Error: syntax error at or near "CREATE" LINE 1: ... TABLE onelake."_bench_capability"."dk_37930015241_1_branch" CREATE BRANCH probe_branch ^^^^^^`
+40. DuckDB, Create branch: ALTER TABLE ... CREATE BRANCH: `Parser Error: syntax error at or near "CREATE" LINE 1: ... TABLE onelake."_bench_capability"."dk_37949375865_1_branch" CREATE BRANCH probe_branch ^^^^^^`
 41. Sail, Create branch: ALTER TABLE ... CREATE BRANCH: `IllegalArgumentException: invalid argument: found CREATE at 66:72 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 42. chDB, Create branch: ALTER TABLE ... CREATE BRANCH: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 65 (CREATE): CREATE BRANCH probe_branch. Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED PARTITION, DROP DETAC…`
 43. Sail, Create tag: ALTER TABLE ... CREATE TAG: `IllegalArgumentException: invalid argument: found CREATE at 63:69 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 44. chDB, Create tag: ALTER TABLE ... CREATE TAG: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 62 (CREATE): CREATE TAG probe_tag. Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED PARTITION, DROP DETACHED PA…`
-45. chDB, Drop table with purge: DROP TABLE (chDB sends purgeRequested=false): `ChdbError: Code: 736. DB::Exception: Failed to drop table DB::HTTPException: Received error from remote server https://onelake.table.fabric.microsoft.com/iceberg/v1/namespaces/_bench_capability/tables/ch_37945065317_1_droppable?purgeRequested=False. HTTP status code: 405 'Method Not Allowed', body …`
+45. chDB, Drop table with purge: DROP TABLE (chDB sends purgeRequested=false): `ChdbError: Code: 736. DB::Exception: Failed to drop table DB::HTTPException: Received error from remote server https://onelake.table.fabric.microsoft.com/iceberg/v1/namespaces/_bench_capability/tables/ch_37949375865_1_droppable?purgeRequested=False. HTTP status code: 405 'Method Not Allowed', body …`
+46. Polars, INSERT ... SELECT racing a writer: no stale row: scan max(id) + 1, sum(v), sink it; B appends in between: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
+47. DuckDB, INSERT ... SELECT racing a writer: no stale row: INSERT INTO t SELECT max(id) + 1, sum(v) FROM t; B appends a row: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
+48. chDB, INSERT ... SELECT racing a writer: no stale row: INSERT INTO t SELECT max(id) + 1, sum(v); B appends: `skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]`
 
 ## DuckDB: isolation levels and transactions
 
@@ -147,12 +154,12 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 
 | Transaction (`BEGIN ... COMMIT`), B commits in the middle | Outcome | What came back |
 |---|---|---|
-| BEGIN; read; B appends; read again | repeatable | `reads 3, B appends, reads 3; COMMIT ok` |
+| BEGIN; read; B appends; read again | broken | `CommitStateUnknownException: CommitStateUnknownException: CommitStateUnknownException: An unknown server-side problem occurred; the commit state is unknown` |
 | B commits after BEGIN, before the first read | at first read | `BEGIN, B appends, the first read sees 4 rows; B appends again, the next read sees 4` |
 | read v, B changes it, UPDATE v + 1, COMMIT | broken | `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref` |
 | read count, B appends, INSERT the count, COMMIT | skew | `reads count 3, B appends, INSERT (100, count); COMMIT ok; commits [409, 200]; [(1, 10), (2, 20), (3, 30), (4, 40), (100, 3)]` |
-| the same on a commit.retry.num-retries = 0 table | refused | `reads count 3, B appends, INSERT (100, count); COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/…` |
-| INSERT + UPDATE + DELETE in one transaction | broken | `INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned …` |
+| the same on a commit.retry.num-retries = 0 table | refused | `reads count 3, B appends, INSERT (100, count); COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/…` |
+| INSERT + UPDATE + DELETE in one transaction | broken | `INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned …` |
 | INSERT + DELETE, then ROLLBACK | nothing sent | `INSERT + DELETE, ROLLBACK; commits [none]; [(1, 10), (2, 20), (3, 30)]` |
 | a failing statement inside the transaction | all rolled back | `INSERT ok, then INSERT failed (RuntimeError: RuntimeError: Conversion Error: Could not convert string 'not a number' to …); COMMIT ok; [(1, 10), (2, 20), (3, 30)]` |
 | own uncommitted rows, inside and from another connection | yes | `uncommitted INSERT: this transaction reads 4, another connection 3; COMMIT ok; catalog 4 rows` |
@@ -161,9 +168,9 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 
 | Statements in one `BEGIN ... COMMIT`, no concurrent writer | Outcome | What came back |
 |---|---|---|
-| TRUNCATE, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| DELETE all, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| DROP TABLE, CREATE TABLE the same name with a new column, INSERT | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create; t (('id', 'v'), [(1…` |
+| TRUNCATE, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| DELETE all, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| DROP TABLE, CREATE TABLE the same name with a new column, INSERT | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37949375865_1_cb_drop_create; t (('id', 'v'), [(1…` |
 | CREATE a copy AS SELECT, DROP TABLE, CREATE TABLE the same name AS SELECT from the copy | PARTIAL | `DROP refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it mixes table updates with rename/drop requests; t (('id', …` |
 | CREATE OR REPLACE TABLE t AS SELECT ... FROM t | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements; t (('id', 'v'), [(1, 10), (2, 20)…` |
 | CREATE TABLE, INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 1)]); sent ['POST tables 200', 'POST n 200']` |
@@ -174,22 +181,22 @@ Columns are table properties: `serializable` nothing set; `snapshot` `write.dele
 | RENAME COLUMN, INSERT | works | `t (('id', 'v2'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']` |
 | DROP COLUMN, INSERT | works | `t (('id',), [(1,), (2,), (3,), (4,)]); n None; sent ['POST t 200']` |
 | SET PARTITIONED BY (bucket(4, id)), INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']; spec ['bucket[4]']` |
-| INSERT, UPDATE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| INSERT, DELETE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| UPDATE a row, then DELETE it | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| MERGE, then MERGE the same row again | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
-| INSERT ... SELECT from the table, DELETE the originals | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| INSERT, UPDATE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| INSERT, DELETE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| UPDATE a row, then DELETE it | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| MERGE, then MERGE the same row again | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
+| INSERT ... SELECT from the table, DELETE the originals | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:42773/iceberg/v1' returned a non-200 status …` |
 | TRUNCATE, INSERT, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
 | DROP TABLE, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
-| DROP TABLE, CREATE TABLE the same name, ROLLBACK | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create_rollback; t (('id', …` |
+| DROP TABLE, CREATE TABLE the same name, ROLLBACK | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37949375865_1_cb_drop_create_rollback; t (('id', …` |
 | CREATE TABLE, INSERT, ROLLBACK | WRONG | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']; expected t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]), n None` |
 
 ## Where these readings come from
 
 The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/capability.yml`), which writes this file. Every cell is a reading taken by sending the request, not a property of the product: re-run rather than trust it.
 
-- polars: 2.0.0, run 37946047727, 2026-10-09
-- duckdb: v2.0.0-alpha46057, run 37930015241, 2026-10-09
+- polars: 2.0.0, run 37949375865, 2026-10-09
+- duckdb: v2.0.0-alpha46057, run 37949375865, 2026-10-09
 - sail: 0.7.2, run 37930015241, 2026-10-09
-- chdb: 4.4.0, run 37945065317, 2026-10-09
-- duckdb_isolation: v2.0.0-alpha46057, run 37930015241, 2026-10-09
+- chdb: 4.4.0, run 37949375865, 2026-10-09
+- duckdb_isolation: v2.0.0-alpha46057, run 37949375865, 2026-10-09

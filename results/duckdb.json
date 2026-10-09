@@ -21,7 +21,7 @@
    "group": "create",
    "question": "CREATE TABLE (the catalog assigns the location)",
    "outcome": "supported",
-   "detail": "created at the catalog's location `\u2026/Tables/_bench_capability/dk_37930015241_1_base`; field ids [1, 2], format-version 2"
+   "detail": "created at the catalog's location `\u2026/Tables/_bench_capability/dk_37949375865_1_base`; field ids [1, 2], format-version 2"
   },
   {
    "key": "create_if_not_exists",
@@ -329,7 +329,7 @@
    "group": "refs",
    "question": "ALTER TABLE ... CREATE BRANCH",
    "outcome": "no",
-   "detail": "Parser Error: syntax error at or near \"CREATE\" LINE 1: ... TABLE onelake.\"_bench_capability\".\"dk_37930015241_1_branch\" CREATE BRANCH probe_branch ^^^^^^"
+   "detail": "Parser Error: syntax error at or near \"CREATE\" LINE 1: ... TABLE onelake.\"_bench_capability\".\"dk_37949375865_1_branch\" CREATE BRANCH probe_branch ^^^^^^"
   },
   {
    "key": "expire_snapshots",
@@ -343,7 +343,7 @@
    "group": "maintenance",
    "question": "iceberg_rollback_to_snapshot",
    "outcome": "no-op",
-   "detail": "returned success; the catalog holds current-snapshot-id 5109115728643639501, refs.main 8932305451056187449, asked for 8932305451056187449"
+   "detail": "returned success; the catalog holds current-snapshot-id 3143829518370817350, refs.main 1942389081393610979, asked for 1942389081393610979"
   },
   {
    "key": "rewrite_data_files",
@@ -371,7 +371,7 @@
    "group": "catalog",
    "question": "CREATE SCHEMA (namespace)",
    "outcome": "supported",
-   "detail": "`dk_37930015241_1_ns` created; pyiceberg lists it"
+   "detail": "`dk_37949375865_1_ns` created; pyiceberg lists it"
   },
   {
    "key": "drop_schema",
@@ -381,6 +381,6 @@
    "detail": "the empty namespace is gone"
   }
  ],
- "run": "37930015241",
+ "run": "37949375865",
  "date": "2026-10-09"
 }
