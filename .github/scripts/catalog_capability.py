@@ -74,6 +74,10 @@ class NoOp(Exception):
     """The endpoint took the request, returned success, and did not do it."""
 
 
+class Broken(Exception):
+    """The probe could not ask its question, whatever the message says."""
+
+
 # --------------------------------------------------------------------------------------------
 # plain HTTP, for the questions pyiceberg has no API for
 # --------------------------------------------------------------------------------------------
@@ -206,6 +210,10 @@ class Report:
         except NoOp as noop:
             self.record(group, question, NOOP, noop, key)
             print(f"     no-op      {scrub.scrub(noop)}", flush=True)
+            return False
+        except Broken as broken:
+            self.record(group, question, BROKEN, broken, key)
+            print(f"     broken     {scrub.scrub(broken)}", flush=True)
             return False
         except Exception as exc:  # noqa: BLE001 - reporting the failure is the job
             message = self._reason(exc)

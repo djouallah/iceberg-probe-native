@@ -137,6 +137,15 @@ ROWS = [
     ),
     ("Credential vending", {"duckdb": ["credential_vending"]}),
     ("A commit against a stale snapshot is refused", {"polars": ["stale_assertion"]}),
+    # Writer B (pyiceberg) commits between the engine's read and its commit (bench/race.py).
+    # DuckDB's cells are its isolation run's, at Iceberg's default level.
+    ("Concurrent append: both kept", {e: ["race_append"] for e in ENGINES}),
+    (
+        "Concurrent writer: INSERT ... SELECT not committed from a stale read",
+        {e: ["race_read_write"] for e in ENGINES},
+    ),
+    ("Concurrent writer: DELETE loses nothing", {e: ["race_delete"] for e in SQL}),
+    ("Concurrent writer: UPDATE loses nothing", {e: ["race_update"] for e in SQL}),
 ]
 
 # chDB's probe keys where they differ from the row's shared name; the rows built over ENGINES
@@ -206,6 +215,9 @@ def _one_line(text: str, limit: int = 300) -> str:
 def capability(data: dict) -> tuple[list[str], list[str]]:
     engines = [e for e in ENGINES if e in data]
     by_key = {e: {r["key"]: r for r in data[e]["rows"]} for e in engines}
+    if "duckdb" in by_key:
+        isolation_rows = data.get("duckdb_isolation", {}).get("rows", [])
+        by_key["duckdb"].update({r["key"]: r for r in isolation_rows})
     head = ["| Operation | " + " | ".join(TITLE[e] for e in engines) + " |"]
     head.append("|---|" + "---|" * len(engines))
     head.append("| Version | " + " | ".join(data[e]["version"] for e in engines) + " |")

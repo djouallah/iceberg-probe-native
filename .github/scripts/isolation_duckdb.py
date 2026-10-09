@@ -42,7 +42,19 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from catalog_capability import NAMESPACE, iceberg_schema, rows, save_results
+from catalog_capability import (
+    BROKEN,
+    NAMESPACE,
+    NOOP,
+    REFUSED,
+    SUPPORTED,
+    Broken,
+    NoOp,
+    Refused,
+    iceberg_schema,
+    rows,
+    save_results,
+)
 
 from bench import auth, scrub
 from bench.config import Config
@@ -227,6 +239,101 @@ def classify(race: Race, final, raised: bool, statuses: list[int]) -> str:
     return "corrupt"
 
 
+def inject_b(catalog, table: str, kind: str):
+    """Writer B's change, through pyiceberg on the real endpoint."""
+
+    def run():
+        tbl = catalog.load_table((NAMESPACE, table))
+        if kind == "append":
+            tbl.append(rows([APPENDED]))
+        elif kind == "bump":
+            tbl.overwrite(rows([(1, 110)]), overwrite_filter="id == 1")
+        elif kind == "delete3":
+            tbl.delete("id == 3")
+        else:
+            raise ValueError(kind)
+
+    return run
+
+
+def final_rows(catalog, table: str) -> list:
+    scan = catalog.load_table((NAMESPACE, table)).scan(selected_fields=("id", "v"))
+    return sorted((r["id"], r["v"]) for r in scan.to_arrow().to_pylist())
+
+
+# --------------------------------------------------------------------------------------------
+# the capability matrix's concurrency rows: the same races, asked of every engine
+# --------------------------------------------------------------------------------------------
+
+# probe key -> (race, the outcomes that are safe). A refusal is safe wherever the engine's write
+# depends on what it read; for a blind append it is not, because nothing stops it re-applying.
+RACE_ROWS = {
+    "race_append": ("insert", {"retried"}),
+    "race_read_write": ("insert_select", {"refused", "re-run"}),
+    "race_delete": ("delete", {"refused", "retried"}),
+    "race_update": ("update_other", {"refused", "retried"}),
+}
+RACE = {race.key: race for race in RACES}
+
+
+def matrix_outcome(key: str, outcome: str) -> str:
+    """One race outcome as a capability-matrix outcome."""
+    if outcome in RACE_ROWS[key][1]:
+        return SUPPORTED
+    if outcome in ("error", "broken"):
+        return BROKEN
+    return NOOP if outcome == "no-op" else REFUSED
+
+
+def matrix_rows(levels: dict, level: str = "serializable") -> list[dict]:
+    """DuckDB's races at Iceberg's default level, as rows the readme's DuckDB column reads."""
+    found = []
+    for key, (race, _) in RACE_ROWS.items():
+        if (race, level) in levels:
+            outcome, detail = levels[(race, level)]
+            found.append(
+                {
+                    "key": key,
+                    "group": "concurrency",
+                    "question": RACE[race].title,
+                    "outcome": matrix_outcome(key, outcome),
+                    "detail": f"{outcome}: {detail}",
+                }
+            )
+    return found
+
+
+def race_probe(key: str, catalog, proxy, table: str, write) -> str:
+    """One concurrency probe for any engine: `table` holds SEED; B is armed to commit between
+    the engine's read and its commit, `write()` is the engine's statement through `proxy`, and
+    the final rows read through pyiceberg decide."""
+    race = RACE[RACE_ROWS[key][0]]
+    proxy.arm(NAMESPACE, table, inject_b(catalog, table, race.inject))
+    raised = ""
+    try:
+        write()
+    except Exception as exc:  # noqa: BLE001 - the engine's error is the reading
+        raised = _err(exc)
+    final = final_rows(catalog, table)
+    statuses = proxy.statuses(NAMESPACE, table)
+    seen = proxy.commits.get((NAMESPACE, table), [])
+    detail = f"final {final}; commits [{', '.join(str(s) for s, _ in seen) or 'none'}]"
+    if raised:
+        detail += f"; raised {raised}"
+    if statuses and proxy.injected.get((NAMESPACE, table)) != "landed":
+        outcome = "broken"
+        detail += f"; B {proxy.injected.get((NAMESPACE, table))}"
+    else:
+        outcome = classify(race, final, bool(raised), statuses)
+    verdict_ = matrix_outcome(key, outcome)
+    detail = f"{outcome}: {detail}"
+    if verdict_ == SUPPORTED:
+        return detail
+    if verdict_ == BROKEN:
+        raise Broken(detail)
+    raise NoOp(detail) if verdict_ == NOOP else Refused(detail)
+
+
 # --------------------------------------------------------------------------------------------
 # the probe
 # --------------------------------------------------------------------------------------------
@@ -284,27 +391,13 @@ class DuckDBIsolation:
         return name
 
     def final(self, table: str):
-        scan = self.catalog.load_table((NAMESPACE, table)).scan(selected_fields=("id", "v"))
-        return sorted((r["id"], r["v"]) for r in scan.to_arrow().to_pylist())
+        return final_rows(self.catalog, table)
 
     def snapshots(self, table: str) -> int:
         return len(self.catalog.load_table((NAMESPACE, table)).snapshots())
 
     def b(self, kind: str, table: str):
-        """Writer B's change, through pyiceberg on the real endpoint."""
-
-        def run():
-            tbl = self.catalog.load_table((NAMESPACE, table))
-            if kind == "append":
-                tbl.append(rows([APPENDED]))
-            elif kind == "bump":
-                tbl.overwrite(rows([(1, 110)]), overwrite_filter="id == 1")
-            elif kind == "delete3":
-                tbl.delete("id == 3")
-            else:
-                raise ValueError(kind)
-
-        return run
+        return inject_b(self.catalog, table, kind)
 
     def commits(self, table: str) -> str:
         seen = self.proxy.commits.get((NAMESPACE, table), [])
@@ -891,6 +984,8 @@ def main() -> int:
                 f"{key}/{level}": {"outcome": outcome, "detail": detail}
                 for (key, level), (outcome, detail) in probe.levels.items()
             },
+            # The readme's concurrency rows, in DuckDB's column.
+            "rows": matrix_rows(probe.levels),
             "transactions": [
                 {"key": key, "title": titles[key], "outcome": outcome, "detail": detail}
                 for key, outcome, detail in probe.transactions

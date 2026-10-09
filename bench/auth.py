@@ -89,8 +89,9 @@ def onelake_token(skew: int = 300) -> str:
     return _cached[0]
 
 
-def catalog(cfg: Config):
-    """A pyiceberg RestCatalog on the Fabric OneLake Iceberg endpoint.
+def catalog(cfg: Config, uri: str = ICEBERG_ENDPOINT):
+    """A pyiceberg RestCatalog on the Fabric OneLake Iceberg endpoint, or on `uri` (bench.race's
+    local proxy, which forwards to it).
 
     Used by `prepare` (table creation and add_files) and by the Polars engine. The other three
     engines attach the catalog natively and never import pyiceberg.
@@ -105,7 +106,7 @@ def catalog(cfg: Config):
     return load_catalog(
         "onelake",
         **{
-            "uri": ICEBERG_ENDPOINT,
+            "uri": uri,
             "token": token,
             "warehouse": cfg.warehouse,
             "adls.account-name": "onelake",

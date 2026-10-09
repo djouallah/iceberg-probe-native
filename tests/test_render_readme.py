@@ -76,3 +76,27 @@ def test_the_blocked_section_is_kept_verbatim_and_the_rest_rewritten():
     assert "| Rename table | no: `501` |" in text
     assert "stale table" not in text and "## Old section" not in text
     assert text.count("<!-- blocked:start -->") == 1
+
+
+def test_duckdb_isolation_rows_fill_the_duckdb_column():
+    data = {
+        **DATA,
+        "duckdb_isolation": {
+            "engine": "duckdb_isolation",
+            "version": "v2.0.0-alpha1",
+            "run": "1",
+            "date": "2026-10-09",
+            "configs": {},
+            "levels": {},
+            "transactions": [],
+            "combos": [],
+            "rows": [_row("race_append"), _row("race_read_write", "no", "skew: final [...]")],
+        },
+    }
+    text = render_readme.render(data, README)
+    lines = text.splitlines()
+    assert "| Concurrent append: both kept | — | yes |" in lines
+    assert any(
+        ln.startswith("| Concurrent writer: INSERT ... SELECT") and "| — | no " in ln
+        for ln in lines
+    )

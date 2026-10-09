@@ -69,18 +69,22 @@ class ChdbIceberg:
         for statement in SESSION_SETTINGS:
             self._session.query(statement)
 
+        self.attach(DB, ICEBERG_ENDPOINT)
+        scrub.safe_print(f"  chdb {self.version} attached")
+
+    def attach(self, name: str, endpoint: str) -> None:
+        """The OneLake catalog as database `name`, reached at `endpoint`."""
         # NOT logged, at any verbosity: this statement contains the bearer token.
         token = auth.onelake_token()
         self._session.query(
             f"""
-            CREATE DATABASE {DB}
-            ENGINE = DataLakeCatalog('{ICEBERG_ENDPOINT}')
+            CREATE DATABASE {name}
+            ENGINE = DataLakeCatalog('{endpoint}')
             SETTINGS catalog_type = 'onelake',
                      warehouse = '{self.cfg.warehouse}',
                      onelake_bearer_token = '{token}'
             """
         )
-        scrub.safe_print(f"  chdb {self.version} attached")
 
     def query(self, sql: str) -> list[tuple]:
         """Run one statement; its rows, or [] for a statement that returns none.

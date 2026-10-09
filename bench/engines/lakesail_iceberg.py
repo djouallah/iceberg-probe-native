@@ -38,7 +38,8 @@ class LakesailIceberg:
         """The live Spark Connect session, None before setup()."""
         return self._spark
 
-    def setup(self) -> None:
+    def setup(self, race_endpoint: str | None = None) -> None:
+        """`race_endpoint`, when given, is a second catalog, `race`, on bench.race's proxy."""
         from pysail.spark import SparkConnectServer
         from pyspark.sql import SparkSession
 
@@ -74,21 +75,27 @@ class LakesailIceberg:
         # constant applies the day Sail caches the loaded table. See config.CATALOG_CACHE_SECONDS
         # and lakehq/sail#2629.
         # Sail's `onelake` catalog hard-codes the public host, so any other endpoint (the
-        # isolation probe's local proxy) goes through its generic Iceberg REST catalog instead.
+        # concurrency probes' local proxy) goes through its generic Iceberg REST catalog instead.
+        def rest(endpoint: str) -> str:
+            return (
+                f'type="iceberg-rest", uri="{endpoint}", '
+                f'warehouse="{self.cfg.warehouse}", bearer_access_token="{token}"'
+            )
+
         if ICEBERG_ENDPOINT == "https://onelake.table.fabric.microsoft.com/iceberg":
             where = (
                 f'type="onelake", url="{self.cfg.warehouse}", api="iceberg", bearer_token="{token}"'
             )
         else:
-            where = (
-                f'type="iceberg-rest", uri="{ICEBERG_ENDPOINT}", '
-                f'warehouse="{self.cfg.warehouse}", bearer_access_token="{token}"'
-            )
-        os.environ["SAIL_CATALOG__LIST"] = (
-            f'[{{{where}, name="onelake", '
+            where = rest(ICEBERG_ENDPOINT)
+        cache = (
             f'table_cache_type="session", table_cache_ttl_secs={CATALOG_CACHE_SECONDS}, '
-            f'database_cache_type="session", database_cache_ttl_secs={CATALOG_CACHE_SECONDS}}}]'
+            f'database_cache_type="session", database_cache_ttl_secs={CATALOG_CACHE_SECONDS}'
         )
+        catalogs = [f'{{{where}, name="onelake", {cache}}}']
+        if race_endpoint:
+            catalogs.append(f'{{{rest(race_endpoint)}, name="race", {cache}}}')
+        os.environ["SAIL_CATALOG__LIST"] = f"[{', '.join(catalogs)}]"
 
         self._server = SparkConnectServer()
         self._server.start()

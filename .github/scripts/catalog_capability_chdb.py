@@ -35,6 +35,7 @@ from catalog_capability import (
     SUPPORTED,
     TEMPORAL,
     TRANSFORM_ROWS,
+    Broken,
     NoOp,
     Refused,
     Report,
@@ -43,15 +44,18 @@ from catalog_capability import (
     partition_result,
     promotion_check,
     promotion_schema,
+    rows,
     transform_case,
     type_result,
     type_schema,
     verdict,
 )
+from isolation_duckdb import race_probe
 
 from bench import auth, scrub
 from bench.config import Config
 from bench.engines.chdb_iceberg import DB, ChdbIceberg
+from bench.race import RaceProxy
 
 SEED = [(1, 10), (2, 20), (3, 30)]
 
@@ -109,6 +113,8 @@ class ChdbCapability:
         self.created: list[str] = []
         self.by_pyiceberg: set[str] = set()
         self._catalog = None
+        self.proxy = None
+        self.race_error = ""
 
     # -- helpers -----------------------------------------------------------------------------
 
@@ -219,6 +225,12 @@ class ChdbCapability:
 
     def session(self) -> str:
         self.engine.setup()
+        # A second database, `race`, on bench.race's proxy, for the concurrency probes only.
+        self.proxy = RaceProxy().start()
+        try:
+            self.engine.attach("race", self.proxy.endpoint)
+        except Exception as exc:  # noqa: BLE001 - only the concurrency probes depend on it
+            self.race_error = _one_line(f"{type(exc).__name__}: {exc}", 300)
         self.version = self.engine.version
         listed = self.sql(
             f"SELECT count() FROM system.tables WHERE database = '{DB}' "
@@ -532,6 +544,36 @@ class ChdbCapability:
         self.created.remove(table)
         return "gone from the catalog"
 
+    # -- concurrency -------------------------------------------------------------------------
+
+    def _race(self, key: str, statement: str) -> str:
+        """pyiceberg makes and seeds the table; chDB writes through the `race` database, whose
+        commit bench.race holds until pyiceberg's has landed."""
+        if self.proxy is None:
+            raise Skip("no chDB session")
+        if self.race_error:
+            raise Broken(f"the `race` database on the proxy did not attach: {self.race_error}")
+        table = self.name(key)
+        self.pyiceberg().create_table((self.ns, table), schema=iceberg_schema())
+        self.created.append(table)
+        self.iceberg(table).append(rows(SEED))
+        raced = f"race.`{self.ns}.{table}`"
+        return race_probe(
+            key, self.pyiceberg(), self.proxy, table, lambda: self.sql(statement.format(t=raced))
+        )
+
+    def race_append(self) -> str:
+        return self._race("race_append", "INSERT INTO {t} VALUES (5, 50)")
+
+    def race_read_write(self) -> str:
+        return self._race("race_read_write", "INSERT INTO {t} SELECT max(id) + 1, sum(v) FROM {t}")
+
+    def race_delete(self) -> str:
+        return self._race("race_delete", "DELETE FROM {t} WHERE id = 1")
+
+    def race_update(self) -> str:
+        return self._race("race_update", "ALTER TABLE {t} UPDATE v = v + 1 WHERE id = 2")
+
     # -- teardown ----------------------------------------------------------------------------
 
     def drop_everything(self) -> None:
@@ -590,6 +632,10 @@ PROBES = [
     ("maintenance", "OPTIMIZE TABLE (compaction)", "compaction"),
     ("catalog", "RENAME TABLE, then read", "rename_table"),
     ("catalog", "DROP TABLE (chDB sends purgeRequested=false)", "drop_table"),
+    ("concurrency", "INSERT INTO; B appends between chDB's read and commit", "race_append"),
+    ("concurrency", "INSERT INTO t SELECT max(id) + 1, sum(v); B appends", "race_read_write"),
+    ("concurrency", "DELETE id 1; B appends", "race_delete"),
+    ("concurrency", "ALTER TABLE ... UPDATE v = v + 1 on id 2; B appends", "race_update"),
 ]
 
 
@@ -631,6 +677,8 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - teardown must not mask the findings
             print(f"  warning: teardown failed: {_one_line(exc, 200)}")
         probe.engine.close()
+        if probe.proxy is not None:
+            probe.proxy.close()
 
     counts = probe.report.tally()
     print("\n" + "\n".join(probe.report.markdown()))

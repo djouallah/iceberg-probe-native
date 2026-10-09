@@ -54,9 +54,11 @@ from catalog_capability import (
     type_schema,
     verdict,
 )
+from isolation_duckdb import race_probe
 
 from bench import auth, scrub
 from bench.config import Config
+from bench.race import RaceProxy
 
 SEED = [(1, 10), (2, 20), (3, 30)]
 
@@ -79,6 +81,8 @@ class PolarsCapability:
         self.catalog = None
         self.storage: dict[str, str] = {}
         self.created: list[str] = []
+        self.proxy = None
+        self.race_catalog = None
 
     # -- helpers -----------------------------------------------------------------------------
 
@@ -334,6 +338,33 @@ class PolarsCapability:
             f"table now holds {self._py_rows(table)}"
         )
 
+    # -- concurrency -------------------------------------------------------------------------
+
+    def _race(self, key: str, write) -> str:
+        """Polars writes through a catalog on bench.race's proxy, which lands pyiceberg's commit
+        between Polars' read and Polars' commit."""
+        if self.proxy is None:
+            self.proxy = RaceProxy().start()
+            self.race_catalog = auth.catalog(self.cfg, self.proxy.endpoint)
+        table = self.fresh(key)
+        raced = self.race_catalog.load_table(table.name())
+        return race_probe(key, self.catalog, self.proxy, table.name()[-1], lambda: write(raced))
+
+    def race_append(self) -> str:
+        return self._race("race_append", lambda t: self.sink(t, rows([(5, 50)])))
+
+    def race_read_write(self) -> str:
+        """`INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, as a Polars scan and sink."""
+        import polars as pl
+
+        def write(table):
+            frame = self.scan(table).select(
+                (pl.col("id").max() + 1).alias("id"), pl.col("v").sum().alias("v")
+            )
+            self.sink(table, frame.collect())
+
+        return self._race("race_read_write", write)
+
     # -- teardown ----------------------------------------------------------------------------
 
     def drop_everything(self) -> None:
@@ -369,6 +400,12 @@ PROBES = [
     ("schema", "write before and after partition evolution", "write_after_evolution"),
     ("read", "time travel, scan_iceberg(snapshot_id=)", "time_travel"),
     ("commit", "is assert-ref-snapshot-id enforced on a Polars commit", "stale_assertion"),
+    ("concurrency", "sink append; B appends between Polars' read and commit", "race_append"),
+    (
+        "concurrency",
+        "scan max(id) + 1, sum(v), sink it; B appends in between",
+        "race_read_write",
+    ),
 ]
 
 
@@ -409,6 +446,8 @@ def main() -> int:
             probe.drop_everything()
         except Exception as exc:  # noqa: BLE001 - teardown must not mask the findings
             print(f"  warning: teardown failed: {_one_line(exc, 200)}")
+        if probe.proxy is not None:
+            probe.proxy.close()
 
     counts = probe.report.tally()
     print("\n" + "\n".join(probe.report.markdown()))

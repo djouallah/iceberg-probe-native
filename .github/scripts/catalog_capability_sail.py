@@ -35,16 +35,20 @@ from catalog_capability import (
     Refused,
     Report,
     Skip,
+    iceberg_schema,
     partition_result,
     promotion_check,
+    rows,
     transform_case,
     type_result,
     verdict,
 )
+from isolation_duckdb import race_probe
 
 from bench import auth, scrub
 from bench.config import Config
 from bench.engines.lakesail_iceberg import LakesailIceberg
+from bench.race import RaceProxy
 
 CATALOG = "onelake"
 SEED = [(1, 10), (2, 20), (3, 30)]
@@ -125,6 +129,7 @@ class SailCapability:
         self.created: list[str] = []
         self.namespaces: list[str] = []
         self._catalog = None
+        self.proxy = None
 
     # -- helpers -----------------------------------------------------------------------------
 
@@ -232,7 +237,9 @@ class SailCapability:
     # -- session -----------------------------------------------------------------------------
 
     def session(self) -> str:
-        self.engine.setup()
+        # A second catalog, `race`, on bench.race's proxy, for the concurrency probes.
+        self.proxy = RaceProxy().start()
+        self.engine.setup(race_endpoint=self.proxy.endpoint)
         self.spark = self.engine.session
         self.spark.conf.set("spark.sql.session.timeZone", "UTC")
         self.version = self.engine.version
@@ -598,6 +605,37 @@ class SailCapability:
         self.created.remove(table)
         return "gone from the catalog"
 
+    # -- concurrency -------------------------------------------------------------------------
+
+    def _race(self, key: str, statement: str) -> str:
+        """pyiceberg makes and seeds the table; Sail writes through the `race` catalog, whose
+        commit bench.race holds until pyiceberg's has landed."""
+        if self.spark is None:
+            raise Skip("no Sail session")
+        table = self.name(key)
+        self.pyiceberg().create_table((self.ns, table), schema=iceberg_schema())
+        self.created.append(table)
+        self.iceberg(table).append(rows(SEED))
+        raced = f"race.`{self.ns}`.`{table}`"
+        return race_probe(
+            key, self.pyiceberg(), self.proxy, table, lambda: self.sql(statement.format(t=raced))
+        )
+
+    def race_append(self) -> str:
+        return self._race("race_append", "INSERT INTO {t} " + _select([(5, 50)]))
+
+    def race_read_write(self) -> str:
+        return self._race(
+            "race_read_write",
+            "INSERT INTO {t} SELECT CAST(max(id) + 1 AS BIGINT), CAST(sum(v) AS BIGINT) FROM {t}",
+        )
+
+    def race_delete(self) -> str:
+        return self._race("race_delete", "DELETE FROM {t} WHERE id = 1")
+
+    def race_update(self) -> str:
+        return self._race("race_update", "UPDATE {t} SET v = v + 1 WHERE id = 2")
+
     # -- teardown ----------------------------------------------------------------------------
 
     def drop_everything(self) -> None:
@@ -664,6 +702,10 @@ PROBES = [
     ("catalog", "CREATE DATABASE, then DROP DATABASE", "namespace"),
     ("catalog", "ALTER TABLE ... RENAME TO, then read", "rename_table"),
     ("catalog", "DROP TABLE ... PURGE", "drop_purge"),
+    ("concurrency", "INSERT INTO; B appends between Sail's read and commit", "race_append"),
+    ("concurrency", "INSERT INTO t SELECT max(id) + 1, sum(v); B appends", "race_read_write"),
+    ("concurrency", "DELETE id 1; B appends", "race_delete"),
+    ("concurrency", "UPDATE v = v + 1 on id 2; B appends", "race_update"),
 ]
 
 
@@ -705,6 +747,8 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - teardown must not mask the findings
             print(f"  warning: teardown failed: {_one_line(exc, 200)}")
         probe.engine.close()
+        if probe.proxy is not None:
+            probe.proxy.close()
 
     counts = probe.report.tally()
     print("\n" + "\n".join(probe.report.markdown()))
