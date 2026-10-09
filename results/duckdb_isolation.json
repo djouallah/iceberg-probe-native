@@ -1,0 +1,329 @@
+{
+ "engine": "duckdb_isolation",
+ "version": "v2.0.0-alpha46057",
+ "configs": {
+  "serializable": {},
+  "snapshot": {
+   "write.delete.isolation-level": "snapshot",
+   "write.update.isolation-level": "snapshot",
+   "write.merge.isolation-level": "snapshot"
+  },
+  "no retries": {
+   "commit.retry.num-retries": "0"
+  }
+ },
+ "levels": {
+  "insert/serializable": {
+   "outcome": "retried",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]; commits [409, 200]"
+  },
+  "insert/snapshot": {
+   "outcome": "retried",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]; commits [409, 200]"
+  },
+  "insert/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "insert_select/serializable": {
+   "outcome": "skew",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]"
+  },
+  "insert_select/snapshot": {
+   "outcome": "skew",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]"
+  },
+  "insert_select/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "delete/serializable": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: DELETE on \"iso_dk_37930015241_1_delete_serializable\" conflicts with a concurrent commit (scanned snapshot 4503689083398174728, now at 947445311179547733); re-run the DELETE. Set 'write.dele\u2026"
+  },
+  "delete/snapshot": {
+   "outcome": "retried",
+   "detail": "final [(2, 20), (3, 30), (4, 40)]; commits [409, 200]"
+  },
+  "delete/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "update_other/serializable": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "update_other/snapshot": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "update_other/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "merge_other/serializable": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "merge_other/snapshot": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "merge_other/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "delete_vs_delete/serializable": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: DELETE on \"iso_dk_37930015241_1_delete_vs_delete_serializable\" conflicts with a concurrent commit (scanned snapshot 6471162019096093414, now at 2122664710593082451); re-run the DELETE. Set \u2026"
+  },
+  "delete_vs_delete/snapshot": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: DELETE on \"iso_dk_37930015241_1_delete_vs_delete_snapshot\" conflicts with a concurrent commit (scanned snapshot 6351826652735619545, now at 8567879346925000766); re-run the DELETE. Set 'wri\u2026"
+  },
+  "delete_vs_delete/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20)]; commits [409]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client may retry. type: CommitFailedException rea\u2026"
+  },
+  "update_same/serializable": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "update_same/snapshot": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "update_same/no retries": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "merge_same/serializable": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "merge_same/snapshot": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "merge_same/no retries": {
+   "outcome": "broken",
+   "detail": "final [(1, 11), (2, 20), (3, 30)]; commits [200]; B failed: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  "overwrite/serializable": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [400]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026"
+  },
+  "overwrite/snapshot": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [400]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026"
+  },
+  "overwrite/no retries": {
+   "outcome": "refused",
+   "detail": "final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [400]; raised RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026"
+  }
+ },
+ "transactions": [
+  {
+   "key": "repeatable_read",
+   "title": "BEGIN; read; B appends; read again",
+   "outcome": "repeatable",
+   "detail": "reads 3, B appends, reads 3; COMMIT ok"
+  },
+  {
+   "key": "snapshot_point",
+   "title": "B commits after BEGIN, before the first read",
+   "outcome": "at first read",
+   "detail": "BEGIN, B appends, the first read sees 4 rows; B appends again, the next read sees 4"
+  },
+  {
+   "key": "read_modify_write",
+   "title": "read v, B changes it, UPDATE v + 1, COMMIT",
+   "outcome": "broken",
+   "detail": "BadRequestError: BadRequestError: RESTError 400: Received unexpected JSON Payload: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref\",\"target\":null,\"details\":null}}, errors: Field required, Input should be a valid integer, unable to parse string as an integer"
+  },
+  {
+   "key": "append_after_read",
+   "title": "read count, B appends, INSERT the count, COMMIT",
+   "outcome": "skew",
+   "detail": "reads count 3, B appends, INSERT (100, count); COMMIT ok; commits [409, 200]; [(1, 10), (2, 20), (3, 30), (4, 40), (100, 3)]"
+  },
+  {
+   "key": "append_after_read_no_retries",
+   "title": "the same on a commit.retry.num-retries = 0 table",
+   "outcome": "refused",
+   "detail": "reads count 3, B appends, INSERT (100, count); COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client ma\u2026; commits [409]; [(1, 10), (2, 20), (3, 30), (4, 40)]"
+  },
+  {
+   "key": "atomic",
+   "title": "INSERT + UPDATE + DELETE in one transaction",
+   "outcome": "broken",
+   "detail": "INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"Bad\u2026; commits [400]; 0 new snapshot(s); [(1, 10), (2, 20), (3, 30)]"
+  },
+  {
+   "key": "rollback",
+   "title": "INSERT + DELETE, then ROLLBACK",
+   "outcome": "nothing sent",
+   "detail": "INSERT + DELETE, ROLLBACK; commits [none]; [(1, 10), (2, 20), (3, 30)]"
+  },
+  {
+   "key": "failing_statement",
+   "title": "a failing statement inside the transaction",
+   "outcome": "all rolled back",
+   "detail": "INSERT ok, then INSERT failed (RuntimeError: RuntimeError: Conversion Error: Could not convert string 'not a number' to \u2026); COMMIT ok; [(1, 10), (2, 20), (3, 30)]"
+  },
+  {
+   "key": "visibility",
+   "title": "own uncommitted rows, inside and from another connection",
+   "outcome": "yes",
+   "detail": "uncommitted INSERT: this transaction reads 4, another connection 3; COMMIT ok; catalog 4 rows"
+  },
+  {
+   "key": "two_tables",
+   "title": "INSERT into two tables in one transaction",
+   "outcome": "refused",
+   "detail": "INSERT into two tables; COMMIT at the second INSERT: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without atomic multi-table commit support; POSTs []"
+  },
+  {
+   "key": "two_connections",
+   "title": "two DuckDB transactions update the same row",
+   "outcome": "second refused",
+   "detail": "both read v = 10, +1 and +100; first COMMIT ok; second COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (Conflict_409). message: One or more requirements failed. The client ma\u2026; [(1, 11), (2, 20), (3, 30)]"
+  }
+ ],
+ "combos": [
+  {
+   "key": "truncate_insert",
+   "title": "TRUNCATE, INSERT",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "delete_insert",
+   "title": "DELETE all, INSERT",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "drop_create",
+   "title": "DROP TABLE, CREATE TABLE the same name with a new column, INSERT",
+   "outcome": "refused",
+   "detail": "CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []"
+  },
+  {
+   "key": "drop_create_as_select",
+   "title": "CREATE a copy AS SELECT, DROP TABLE, CREATE TABLE the same name AS SELECT from the copy",
+   "outcome": "PARTIAL",
+   "detail": "DROP refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it mixes table updates with rename/drop requests; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']"
+  },
+  {
+   "key": "create_or_replace_self",
+   "title": "CREATE OR REPLACE TABLE t AS SELECT ... FROM t",
+   "outcome": "refused",
+   "detail": "CREATE refused: RuntimeError: RuntimeError: Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []"
+  },
+  {
+   "key": "create_insert",
+   "title": "CREATE TABLE, INSERT",
+   "outcome": "works",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 1)]); sent ['POST tables 200', 'POST n 200']"
+  },
+  {
+   "key": "ctas",
+   "title": "CREATE TABLE AS SELECT from the seeded table",
+   "outcome": "works",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 20), (2, 40), (3, 60)]); sent ['POST tables 200', 'POST n 200']"
+  },
+  {
+   "key": "create_insert_other",
+   "title": "CREATE TABLE, INSERT into another, existing table",
+   "outcome": "PARTIAL",
+   "detail": "INSERT refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without atomic multi-table commit support; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']"
+  },
+  {
+   "key": "add_column_insert",
+   "title": "ADD COLUMN, INSERT a row that fills it",
+   "outcome": "works",
+   "detail": "t (('id', 'v', 'w'), [(1, 10, None), (2, 20, None), (3, 30, None), (4, 40, 400)]); n None; sent ['POST t 200']"
+  },
+  {
+   "key": "add_column_update",
+   "title": "ADD COLUMN, UPDATE it",
+   "outcome": "works",
+   "detail": "t (('id', 'v', 'w'), [(1, 10, 100), (2, 20, 200), (3, 30, 300)]); n None; sent ['POST t 200']"
+  },
+  {
+   "key": "rename_column_insert",
+   "title": "RENAME COLUMN, INSERT",
+   "outcome": "works",
+   "detail": "t (('id', 'v2'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']"
+  },
+  {
+   "key": "drop_column_insert",
+   "title": "DROP COLUMN, INSERT",
+   "outcome": "works",
+   "detail": "t (('id',), [(1,), (2,), (3,), (4,)]); n None; sent ['POST t 200']"
+  },
+  {
+   "key": "partition_insert",
+   "title": "SET PARTITIONED BY (bucket(4, id)), INSERT",
+   "outcome": "works",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']; spec ['bucket[4]']"
+  },
+  {
+   "key": "insert_update",
+   "title": "INSERT, UPDATE the row just inserted",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "insert_delete",
+   "title": "INSERT, DELETE the row just inserted",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "update_delete",
+   "title": "UPDATE a row, then DELETE it",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "merge_twice",
+   "title": "MERGE, then MERGE the same row again",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "insert_select_delete",
+   "title": "INSERT ... SELECT from the table, DELETE the originals",
+   "outcome": "refused",
+   "detail": "COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {\"error\":{\"code\":\"BadRequest\",\"message\":\"Only one instance of\u2026; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent ['POST t 400']"
+  },
+  {
+   "key": "truncate_insert_rollback",
+   "title": "TRUNCATE, INSERT, ROLLBACK",
+   "outcome": "works",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []"
+  },
+  {
+   "key": "drop_rollback",
+   "title": "DROP TABLE, ROLLBACK",
+   "outcome": "works",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []"
+  },
+  {
+   "key": "drop_create_rollback",
+   "title": "DROP TABLE, CREATE TABLE the same name, ROLLBACK",
+   "outcome": "refused",
+   "detail": "CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create_rollback; t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []"
+  },
+  {
+   "key": "create_rollback",
+   "title": "CREATE TABLE, INSERT, ROLLBACK",
+   "outcome": "WRONG",
+   "detail": "t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']; expected t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]), n None"
+  }
+ ],
+ "run": "37930015241",
+ "date": "2026-10-09"
+}

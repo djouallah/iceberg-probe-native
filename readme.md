@@ -1,53 +1,54 @@
 # OneLake Iceberg REST catalog: what the native engines can do
 
-pyiceberg, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no JVM.
+pyiceberg, DuckDB and Sail: engines with their own Iceberg implementation, no JVM.
 
-`yes` works · `no` refused · `no-op` accepted but not applied · `na` the engine has no such
-operation · `—` not probed
+`yes` works · `no` refused · `no-op` accepted but not applied · `na` the engine has no such operation · `—` not probed · `?` the probe could not ask
 
-| Operation | pyiceberg | DuckDB | Sail | chDB |
-|---|---|---|---|---|
-| Version | 0.12.0 | 2.0.0 alpha (dev2609250715) | 0.7.2 | 4.4.0 (ClickHouse 26.9.2.1) |
-| Language | Python | C++ | Rust | C++ |
-| Iceberg implementation | own ¹³ | own | own, on DataFusion | ClickHouse's own |
-| SQL | na | yes | yes | yes |
-| CREATE TABLE | yes | yes | yes | no ⁸ |
-| INSERT / append | yes | yes | yes | yes ⁸ |
-| DELETE | yes ⁷ | yes | no ¹ | yes |
-| Read and write storage with the engine's own token | yes ² | yes ² | yes ² | yes ² |
-| Credential vending | no ³ | yes ³ | na | na |
-| Drop table with purge | yes | yes | yes | no ⁹ |
-| Create / drop namespace | yes | yes | yes | na |
-| CREATE TABLE AS SELECT | na | yes | no ⁴ | no ⁸ |
-| CREATE OR REPLACE TABLE | na | na | na | no ⁸ |
-| UPDATE | na | yes | yes | yes ¹⁰ |
-| MERGE INTO / upsert | yes | yes | yes | na |
-| MERGE ... WHEN NOT MATCHED BY SOURCE | na | yes ¹⁶ | yes | na |
-| INSERT OVERWRITE, whole table | yes | yes ⁵ | yes | na |
-| INSERT OVERWRITE, one partition / by filter | yes | yes ⁵ | na | na |
-| TRUNCATE | na | yes ⁶ | na | na |
-| Partitioned table | yes | yes | yes | yes |
-| Partition transform: bucket | yes | yes | yes | yes |
-| Partition transform: truncate | yes | yes | yes | yes |
-| Partition transforms: year / month / day / hour | yes | yes | yes | yes |
-| Types: decimal, date, timestamp, timestamptz, uuid, binary | yes | yes | yes ¹⁴ | yes ¹⁵ |
-| Nested types: struct, list, map | yes | yes | yes | yes |
-| Add column | yes | yes | na | yes |
-| Drop column | yes | yes | na | yes |
-| Rename column | yes | yes | na | yes |
-| Type promotion (int → long) | yes | yes | na | yes |
-| Partition evolution | yes | yes | na | na |
-| Write after partition evolution | yes | yes | na | na |
-| Set table property | yes | yes | na | na |
-| Sort order at create | yes | yes | na | no ⁸ |
-| Sort order evolution | yes | yes | na | na |
-| Time travel | yes | yes | yes | yes |
-| Metadata tables | yes | yes | na | yes |
-| Compaction | na | yes | na | na ¹¹ |
-| Expire snapshots | yes | na | na | no ¹² |
-| Create branch | yes | na | na | na |
-| Create tag | yes | na | na | na |
-| Write to a branch | yes | na | na | na |
+| Operation | pyiceberg | DuckDB | Sail |
+|---|---|---|---|
+| Version | 0.12.0 | v2.0.0-alpha46057 | 0.7.2 |
+| Language | Python | C++ | Rust |
+| Iceberg implementation | own, pyarrow for the files | own | own, on DataFusion |
+| CREATE TABLE | yes | yes | yes |
+| INSERT / append | yes | yes | yes |
+| INSERT ... SELECT | na | yes | na |
+| DELETE | yes | yes | yes |
+| UPDATE | na | yes | yes |
+| MERGE INTO / upsert | no ¹ | no ² | yes |
+| MERGE with one action | na | yes | na |
+| MERGE ... WHEN NOT MATCHED BY SOURCE | na | no ³ | yes |
+| INSERT OVERWRITE, whole table | no ⁴ | no ⁵ | yes |
+| INSERT OVERWRITE, one partition / by filter | no ⁶ | no ⁷ | no ⁸ |
+| Several writes in one transaction | na | no ⁹ | na |
+| TRUNCATE | na | yes | no ¹⁰ |
+| CREATE TABLE AS SELECT | na | yes | yes |
+| CREATE OR REPLACE TABLE | na | no ¹¹ | no ¹² |
+| Partitioned table | yes | yes | yes |
+| Partition transform: bucket | yes | yes | yes |
+| Partition transform: truncate | yes | yes | yes |
+| Partition transforms: year / month / day / hour | yes | yes | yes |
+| Types: decimal, date, timestamp, timestamptz, uuid, binary | yes | yes | no ¹³ |
+| Nested types: struct, list, map | yes | yes | yes |
+| format-version 3 | no-op ¹⁴ | no-op ¹⁵ | no-op ¹⁶ |
+| Add column | yes | yes | no ¹⁷ |
+| Drop column | yes | yes | no ¹⁸ |
+| Rename column | yes | yes | no ¹⁹ |
+| Type promotion (int → long) | yes | yes | no ²⁰ |
+| Partition evolution | yes | yes | no ²¹ |
+| Write after partition evolution | yes | yes | na |
+| Set table property | yes | yes | no ²² |
+| Sort order at create | yes | yes | na |
+| Sort order evolution | yes | yes | no ²³ |
+| Time travel | yes | yes | yes |
+| Metadata tables | yes | yes | no ²⁴ |
+| Compaction | na | yes | no ²⁵ |
+| Expire snapshots | yes | no ²⁶ | no ²⁷ |
+| Create branch | yes | no ²⁸ | no ²⁹ |
+| Create tag | yes | na | no ³⁰ |
+| Drop table with purge | yes | yes | yes |
+| Create / drop namespace | yes | yes | yes |
+| Credential vending | no ³¹ | yes | na |
+| A commit against a stale snapshot is refused | yes | na | na |
 
 <!-- blocked:start -->
 ## Blocked by the OneLake catalog
@@ -72,60 +73,51 @@ The catalog itself refuses or ignores these, so no engine can do them.
 
 ## Notes
 
-1. Sail writes equality deletes
-   ([lakehq/sail#2698](https://github.com/lakehq/sail/issues/2698)).
-2. No vending: the engine signs storage itself with an Entra token for OneLake. pyiceberg
-   `adls.token`; Sail `AZURE_STORAGE_TOKEN`; DuckDB `CREATE SECRET (TYPE azure, PROVIDER
-   access_token)`; chDB `onelake_bearer_token` on its `DataLakeCatalog` database, which signs the
-   catalog calls too.
-3. The catalog hands out a SAS token scoped to the table's folder (`GET .../credentials`, and in
-   `loadTable` when asked with `X-Iceberg-Access-Delegation`), only as `storage-credentials`, with
-   the table `config` empty. DuckDB with `ACCESS_DELEGATION_MODE 'vended_credentials'` and no
-   storage secret reads a table and inserts into it. pyiceberg finds no credential: the
-   credential's prefix is `https://<host>/<ws>/...`, the table's location is
-   `abfss://<ws>@<host>/...`, and pyiceberg matches by prefix.
-4. Sail through its generic Iceberg REST catalog: `Iceberg table location must be an absolute
-   path or URL`. Plain `CREATE TABLE` works.
-5. DuckDB has no `INSERT OVERWRITE`; its overwrite is `DELETE` + `INSERT` in one transaction.
-6. Not a metadata-only operation in DuckDB.
-7. Copy-on-write only: on a merge-on-read table pyiceberg warns and rewrites the data files
-   instead of writing position deletes.
-8. chDB does not create tables in the catalog. With no engine, a `CREATE TABLE` in its
-   `DataLakeCatalog` database becomes a local MergeTree (`MergeTree storages require data path`).
-   ClickHouse's own tests create a catalog table with an explicit engine and location (`ENGINE =
-   IcebergAzure(...)`, `write_full_path_in_iceberg_metadata = 1`), but that engine does not carry
-   the database's `onelake_bearer_token`: `401 ... Bearer token is not present in the request`.
-   chDB writes only to tables something else created; every chDB `yes` was read on a table
-   pyiceberg created.
-9. ClickHouse's REST catalog drops with `purgeRequested=False` hard-coded, which the catalog
-   refuses (`405`).
-10. `ALTER TABLE ... UPDATE`. `UPDATE ... SET` is not implemented for Iceberg tables.
-11. ClickHouse compacts manifests only (`OPTIMIZE TABLE ... MANIFEST`, from 100 manifests up); it
-    never rewrites data files.
-12. chDB: `expire_snapshots is not supported for Iceberg tables backed by a transactional
-    catalog`.
-13. Python, with pyarrow writing the parquet files. iceberg-rust comes in only through the optional
-    `pyiceberg-core` extra, which computes the bucket and year / month / day / hour partition
-    values; the partition-transform rows were read with it installed.
-14. All but `uuid`: Spark SQL has no UUID type.
-15. A `timestamp` (no zone) is written shifted by chDB's session time zone: `03:04` written on a
-    UTC+10 machine reads back as `17:04` the day before. With `SET session_timezone = 'UTC'` it is
-    written as given.
-16. One UPDATE or DELETE action per `MERGE`: `WHEN MATCHED THEN UPDATE` together with `WHEN NOT
-    MATCHED BY SOURCE THEN DELETE` is refused (`MERGE INTO with Iceberg only supports a single
-    UPDATE/DELETE action currently`).
+1. pyiceberg, MERGE INTO / upsert: upsert: `BadRequestError: RESTError 400: Received unexpected JSON Payload: {"error":{"code":"BadRequest","message":"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref","target":null,"details":null}}, errors: Field required, Input should be a valid i…`
+2. DuckDB, MERGE INTO / upsert: MERGE INTO: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`
+3. DuckDB, MERGE ... WHEN NOT MATCHED BY SOURCE: MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`
+4. pyiceberg, INSERT OVERWRITE, whole table: overwrite the whole table: `BadRequestError: RESTError 400: Received unexpected JSON Payload: {"error":{"code":"BadRequest","message":"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref","target":null,"details":null}}, errors: Field required, Input should be a valid i…`
+5. DuckDB, INSERT OVERWRITE, whole table: overwrite: DELETE + INSERT in one transaction: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`
+6. pyiceberg, INSERT OVERWRITE, one partition / by filter: overwrite by filter: `BadRequestError: RESTError 400: Received unexpected JSON Payload: {"error":{"code":"BadRequest","message":"Only one instance of each update type is allowed per request. Duplicate types: add-snapshot, set-snapshot-ref","target":null,"details":null}}, errors: Field required, Input should be a valid i…`
+7. DuckDB, INSERT OVERWRITE, one partition / by filter: one-partition overwrite: DELETE WHERE p + INSERT in one transaction: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`
+8. Sail, INSERT OVERWRITE, one partition / by filter: INSERT OVERWRITE ... PARTITION (p = 'a'): `UnsupportedOperationException: PARTITION for write`
+9. DuckDB, Several writes in one transaction: transaction: INSERT + INSERT: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`; transaction: UPDATE + INSERT: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`; transaction: UPDATE + UPDATE: `TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'https://onelake.table.fabric.microsoft.com/iceberg/v1' returned a non-200 status code (BadRequest_400), with reason: Bad Request, body: {"error":{"code":"BadRequest","message":"Only one instance of each up…`
+10. Sail, TRUNCATE: TRUNCATE TABLE: `IllegalArgumentException: invalid argument: found TRUNCATE at 0:8 expected something else, ';', statement, or end of input`
+11. DuckDB, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`; CREATE OR REPLACE TABLE ... AS SELECT: `Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements`
+12. Sail, CREATE OR REPLACE TABLE: CREATE OR REPLACE TABLE ... AS SELECT, existing table: `AnalysisException: not supported: Replace table is not supported yet`
+13. Sail, Types: decimal, date, timestamp, timestamptz, uuid, binary: types: decimal, date, timestamp, timestamptz, uuid, binary: `works: ['decimal', 'date', 'timestamp', 'timestamptz', 'binary']; refused: uuid: IllegalArgumentException: invalid argument: found UUID at 84:88 expected data type`
+14. pyiceberg, format-version 3: createTable at format-version 3: `asked for format-version 3, the table came back at 2`
+15. DuckDB, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
+16. Sail, format-version 3: format-version 3: `asked for format-version 3, the table came back at 2`
+17. Sail, Add column: ALTER TABLE ADD COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+18. Sail, Drop column: ALTER TABLE DROP COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+19. Sail, Rename column: ALTER TABLE RENAME COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
+20. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_promote`
+21. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
+22. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37930015241_1_props`
+23. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+24. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37930015241_1_inspect"), Identifier("snapshots")]`
+25. Sail, Compaction: CALL system.rewrite_data_files (compaction): `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
+26. DuckDB, Expire snapshots: iceberg_expire_snapshots: `Catalog Error: Table Function with name iceberg_expire_snapshots does not exist! Did you mean "iceberg_snapshots"?`
+27. Sail, Expire snapshots: CALL system.expire_snapshots: `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
+28. DuckDB, Create branch: ALTER TABLE ... CREATE BRANCH: `Parser Error: syntax error at or near "CREATE" LINE 1: ... TABLE onelake."_bench_capability"."dk_37930015241_1_branch" CREATE BRANCH probe_branch ^^^^^^`
+29. Sail, Create branch: ALTER TABLE ... CREATE BRANCH: `IllegalArgumentException: invalid argument: found CREATE at 66:72 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+30. Sail, Create tag: ALTER TABLE ... CREATE TAG: `IllegalArgumentException: invalid argument: found CREATE at 63:69 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
+31. pyiceberg, Credential vending: read and append on vended credentials alone: `pyiceberg resolved no vended credential (no adls.sas-token key in the table's FileIO); the table's metadata location is 'abfss://1c52481c-0523-4a5a-bbde-fdc932bd77c2@onelake.dfs.fabric.microsoft.com/ac303243-4441-4885-9e7d-f4f5e7af194c/Tables/_bench_capability/cap_37930015241_1_vended/metadata/0000…`
+
 ## DuckDB: isolation levels and transactions
 
-DuckDB is the only one of the four with transactions, so it gets a section of its own. Writer B
-(pyiceberg) commits between DuckDB's read and DuckDB's commit. The race is injected at the REST
-commit through a local proxy (`bench/race.py`): the proxy holds DuckDB's commit, lands B's change,
-then forwards DuckDB's, so the race is deterministic. Updates are relative, DuckDB `v + 1` and B
-`v + 100`, so a lost update would show.
+DuckDB is the only one with transactions. Writer B (pyiceberg) commits between DuckDB's
+read and DuckDB's commit; the race is injected at the REST commit through a local proxy
+(`bench/race.py`), so it is deterministic. Every DuckDB connection runs
+`SET iceberg_use_metadata_log = false`
+([duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475)).
 
-`refused` the commit fails and B's change stands · `retried` DuckDB commits on top of B, both
-changes kept · `skew` a row computed from the stale read is committed beside B's
+`refused` DuckDB's commit fails and B's change stands · `retried` both changes kept ·
+`skew` a row computed from a stale read is committed beside B's ·
+`lost` B's change is gone · `broken` the race could not be run
 
-| DuckDB writes, B commits in between | serializable (default) | snapshot | no retries |
+| DuckDB writes, B commits in between | serializable | snapshot | no retries |
 |---|---|---|---|
 | INSERT, B appends | retried | retried | refused |
 | `INSERT INTO t SELECT max(id) + 1, sum(v) FROM t`, B appends | skew | skew | refused |
@@ -133,101 +125,56 @@ changes kept · `skew` a row computed from the stale read is committed beside B'
 | UPDATE another row, B appends | refused | refused | refused |
 | MERGE on another row, B appends | refused | refused | refused |
 | DELETE a row, B deletes another row | refused | refused | refused |
-| UPDATE the row B updated | refused | refused | refused |
-| MERGE on the row B updated | refused | refused | refused |
-| Overwrite (DELETE + INSERT in one transaction), B appends | refused | retried | refused |
+| UPDATE the row B updated | broken | broken | broken |
+| MERGE on the row B updated | broken | broken | broken |
+| Overwrite (DELETE + INSERT in one transaction), B appends | refused | refused | refused |
 
-The columns are table properties. `serializable` sets nothing, which is Iceberg's default.
-`snapshot` sets `write.delete.isolation-level`, `write.update.isolation-level` and
-`write.merge.isolation-level` to `snapshot`. `no retries` sets `commit.retry.num-retries` to `0`.
+Columns are table properties: `serializable` nothing set; `snapshot` `write.delete.isolation-level = snapshot`, `write.update.isolation-level = snapshot`, `write.merge.isolation-level = snapshot`; `no retries` `commit.retry.num-retries = 0`.
 
-- Nothing was lost in any cell.
-- Appends are never checked against what was read. An INSERT computed from a read of the table
-  commits on top of B at either isolation level. Only `commit.retry.num-retries = 0` fences it,
-  and that also refuses harmless concurrent appends.
-- The check is per commit, not per row. At `serializable`, any concurrent commit refuses a DELETE,
-  UPDATE or MERGE, even an append that touches nothing it read. DuckDB names the switch:
-  `DELETE on "<table>" conflicts with a concurrent commit (scanned snapshot ..., now at ...);
-  re-run the DELETE. Set 'write.delete.isolation-level'='snapshot' to allow re-applying deletes
-  over concurrent appends.`
-- `snapshot` relaxes DELETE only, and only when everything committed in between is an append. B
-  deleting another row still refuses it. UPDATE and MERGE are refused at every level; making them
-  retry is an open pull request,
-  [duckdb-iceberg#1474](https://github.com/duckdb/duckdb-iceberg/pull/1474).
+| Transaction (`BEGIN ... COMMIT`), B commits in the middle | Outcome | What came back |
+|---|---|---|
+| BEGIN; read; B appends; read again | repeatable | `reads 3, B appends, reads 3; COMMIT ok` |
+| B commits after BEGIN, before the first read | at first read | `BEGIN, B appends, the first read sees 4 rows; B appends again, the next read sees 4` |
+| read v, B changes it, UPDATE v + 1, COMMIT | broken | `BadRequestError: BadRequestError: RESTError 400: Received unexpected JSON Payload: {"error":{"code":"BadRequest","message":"Only one instance of each update type is allowed per request. Duplicate typ…` |
+| read count, B appends, INSERT the count, COMMIT | skew | `reads count 3, B appends, INSERT (100, count); COMMIT ok; commits [409, 200]; [(1, 10), (2, 20), (3, 30), (4, 40), (100, 3)]` |
+| the same on a commit.retry.num-retries = 0 table | refused | `reads count 3, B appends, INSERT (100, count); COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/…` |
+| INSERT + UPDATE + DELETE in one transaction | broken | `INSERT + UPDATE + DELETE; COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned …` |
+| INSERT + DELETE, then ROLLBACK | nothing sent | `INSERT + DELETE, ROLLBACK; commits [none]; [(1, 10), (2, 20), (3, 30)]` |
+| a failing statement inside the transaction | all rolled back | `INSERT ok, then INSERT failed (RuntimeError: RuntimeError: Conversion Error: Could not convert string 'not a number' to …); COMMIT ok; [(1, 10), (2, 20), (3, 30)]` |
+| own uncommitted rows, inside and from another connection | yes | `uncommitted INSERT: this transaction reads 4, another connection 3; COMMIT ok; catalog 4 rows` |
+| INSERT into two tables in one transaction | refused | `INSERT into two tables; COMMIT at the second INSERT: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it would require mult…` |
+| two DuckDB transactions update the same row | second refused | `both read v = 10, +1 and +100; first COMMIT ok; second COMMIT RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.…` |
 
-| Transaction (`BEGIN ... COMMIT`), B commits in the middle | DuckDB |
-|---|---|
-| Read twice, B appends in between | repeatable |
-| B commits after `BEGIN`, before the table's first read | read as of the first read, then pinned |
-| Read v, B changes it, UPDATE v + 1, COMMIT | refused |
-| Read the row count, B appends, INSERT the count, COMMIT | skew; refused on a `no retries` table |
-| INSERT + UPDATE + DELETE | one commit request, carrying three snapshots |
-| ROLLBACK | nothing is sent to the catalog |
-| A statement fails inside the transaction | nothing is committed, and the COMMIT that follows returns without an error |
-| Own uncommitted rows | visible inside the transaction, invisible to another connection |
-| Two tables in one transaction | refused at the second table: `Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without atomic multi-table commit support`. The catalog has no multi-table commit. |
-| Two DuckDB transactions update the same row | the second COMMIT is refused |
-
-| Statements in one `BEGIN ... COMMIT`, no concurrent writer | DuckDB |
-|---|---|
-| TRUNCATE, INSERT | works, in one commit |
-| DELETE everything, INSERT | works, in one commit |
-| `INSERT ... SELECT` from the table, then DELETE the originals | works |
-| INSERT, then UPDATE or DELETE the row just inserted | works |
-| UPDATE a row, then DELETE it | works |
-| MERGE the same row twice | works |
-| ADD COLUMN, then INSERT or UPDATE it | works, in one commit |
-| RENAME COLUMN or DROP COLUMN, then INSERT | works |
-| SET PARTITIONED BY, then INSERT | works |
-| CREATE TABLE, INSERT; CREATE TABLE AS SELECT | works, but see below |
-| TRUNCATE + INSERT, then ROLLBACK; DROP TABLE, then ROLLBACK | nothing is sent; the table is unchanged |
-| DROP TABLE, CREATE TABLE the same name | no: `Cannot create table deleted within a transaction` |
-| CREATE OR REPLACE TABLE | no: `CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements` |
-| DROP TABLE plus a write to another table | no: `cannot commit this transaction atomically because it mixes table updates with rename/drop requests` |
-| CREATE TABLE, INSERT into another table | no: the two-table refusal above |
-| CREATE TABLE, INSERT, ROLLBACK | **the new table stays, empty** |
-
-CREATE TABLE is not part of the transaction here. It reaches the catalog when the statement runs,
-not at COMMIT, because OneLake refuses a staged create and DuckDB is attached with
-`STAGE_CREATE_TABLES false`. A ROLLBACK, or a later statement in the transaction failing, leaves
-the new table behind, empty.
-
-Every connection runs `SET iceberg_use_metadata_log = false`. The default, `true` since
-[duckdb-iceberg#1395](https://github.com/duckdb/duckdb-iceberg/pull/1395), reads each table as of
-`BEGIN`. It decides that by comparing the client's clock with the catalog's commit timestamps, and
-with the catalog's clock about half a second ahead, a commit made just before a statement is
-missed, DuckDB's own included:
-[duckdb-iceberg#1475](https://github.com/duckdb/duckdb-iceberg/issues/1475).
-
-## Other readings
-
-- Optimistic concurrency holds: a commit against a stale `assert-ref-snapshot-id` is refused
-  with `CommitFailedException`.
-- A create with no `location` is accepted; the catalog assigns one.
-- `GET /v1/config` declares endpoints for namespaces, tables, rename and per-table
-  `credentials`.
+| Statements in one `BEGIN ... COMMIT`, no concurrent writer | Outcome | What came back |
+|---|---|---|
+| TRUNCATE, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| DELETE all, INSERT | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| DROP TABLE, CREATE TABLE the same name with a new column, INSERT | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create; t (('id', 'v'), [(1…` |
+| CREATE a copy AS SELECT, DROP TABLE, CREATE TABLE the same name AS SELECT from the copy | PARTIAL | `DROP refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it mixes table updates with rename/drop requests; t (('id', …` |
+| CREATE OR REPLACE TABLE t AS SELECT ... FROM t | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: CREATE OR REPLACE not supported in DuckDB-Iceberg. Please use separate Drop and Create Statements; t (('id', 'v'), [(1, 10), (2, 20)…` |
+| CREATE TABLE, INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 1)]); sent ['POST tables 200', 'POST n 200']` |
+| CREATE TABLE AS SELECT from the seeded table | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), [(1, 20), (2, 40), (3, 60)]); sent ['POST tables 200', 'POST n 200']` |
+| CREATE TABLE, INSERT into another, existing table | PARTIAL | `INSERT refused: RuntimeError: RuntimeError: TransactionContext Error: Iceberg REST Catalog cannot commit this transaction atomically because it would require multiple table commit requests without at…` |
+| ADD COLUMN, INSERT a row that fills it | works | `t (('id', 'v', 'w'), [(1, 10, None), (2, 20, None), (3, 30, None), (4, 40, 400)]); n None; sent ['POST t 200']` |
+| ADD COLUMN, UPDATE it | works | `t (('id', 'v', 'w'), [(1, 10, 100), (2, 20, 200), (3, 30, 300)]); n None; sent ['POST t 200']` |
+| RENAME COLUMN, INSERT | works | `t (('id', 'v2'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']` |
+| DROP COLUMN, INSERT | works | `t (('id',), [(1,), (2,), (3,), (4,)]); n None; sent ['POST t 200']` |
+| SET PARTITIONED BY (bucket(4, id)), INSERT | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30), (4, 40)]); n None; sent ['POST t 200']; spec ['bucket[4]']` |
+| INSERT, UPDATE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| INSERT, DELETE the row just inserted | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| UPDATE a row, then DELETE it | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| MERGE, then MERGE the same row again | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| INSERT ... SELECT from the table, DELETE the originals | refused | `COMMIT refused: RuntimeError: RuntimeError: TransactionContext Error: Failed to commit: Failed to commit Iceberg transaction: Request to 'http://127.0.0.1:36497/iceberg/v1' returned a non-200 status …` |
+| TRUNCATE, INSERT, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
+| DROP TABLE, ROLLBACK | works | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n None; sent []` |
+| DROP TABLE, CREATE TABLE the same name, ROLLBACK | refused | `CREATE refused: RuntimeError: RuntimeError: Not implemented Error: Cannot create table deleted within a transaction: onelake._bench_capability.iso_dk_37930015241_1_cb_drop_create_rollback; t (('id', …` |
+| CREATE TABLE, INSERT, ROLLBACK | WRONG | `t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]); n (('id', 'v'), []); sent ['POST tables 200']; expected t (('id', 'v'), [(1, 10), (2, 20), (3, 30)]), n None` |
 
 ## Where these readings come from
 
-The OneLake Iceberg REST catalog, a private preview with no published documentation. Every cell
-is a reading taken by sending the request, not a property of the product, and the surface moves:
-re-run rather than trust this page. Actual deployment time in production may differ.
+The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/capability.yml`), which writes this file. Every cell is a reading taken by sending the request, not a property of the product: re-run rather than trust it.
 
-Read on a laptop with `az login` on 2026-09-30: pyiceberg 0.12.0, DuckDB 2.0.0.dev2609250715,
-Sail 0.7.2, and chDB 4.4.0 under WSL, as chDB has no Windows build. chDB 4.4.0 embeds ClickHouse
-26.9.2.1, the current stable line; ClickHouse master has the same Iceberg `EXECUTE` commands
-(`expire_snapshots`, `remove_orphan_files`) and the same drop.
-
-The partition-transform, type, type-promotion, write-after-evolution and `NOT MATCHED BY SOURCE`
-rows were read on 2026-10-01: pyiceberg (with
-`pyiceberg-core` 0.10.1), Sail and chDB under WSL, DuckDB with the CLI v2.1.0-alpha43762.
-
-The DuckDB isolation and transaction readings were taken on 2026-10-01 under WSL, with DuckDB
-2.0.0.dev2609250715 and its iceberg extension `5b9ff899a1`.
-
-```bash
-ONELAKE_HOST=<host> FABRIC_WORKSPACE_ID=... FABRIC_LAKEHOUSE_ID=... PYTHONPATH=. \
-  python .github/scripts/catalog_capability.py      # or _duckdb.py, _sail.py, _chdb.py
-ONELAKE_HOST=<host> FABRIC_WORKSPACE_ID=... FABRIC_LAKEHOUSE_ID=... PYTHONPATH=. \
-  python .github/scripts/isolation_duckdb.py        # --no-race: each statement alone
-```
+- pyiceberg: 0.12.0, run 37930015241, 2026-10-09
+- duckdb: v2.0.0-alpha46057, run 37930015241, 2026-10-09
+- sail: 0.7.2, run 37930015241, 2026-10-09
+- duckdb_isolation: v2.0.0-alpha46057, run 37930015241, 2026-10-09
