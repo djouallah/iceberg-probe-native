@@ -95,6 +95,8 @@ class LakesailIceberg:
         catalogs = [f'{{{where}, name="onelake", {cache}}}']
         if race_endpoint:
             catalogs.append(f'{{{rest(race_endpoint)}, name="race", {cache}}}')
+            # With two catalogs Sail will not pick one, and every session fails to start.
+            os.environ["SAIL_CATALOG__DEFAULT_CATALOG"] = "onelake"
         os.environ["SAIL_CATALOG__LIST"] = f"[{', '.join(catalogs)}]"
 
         self._server = SparkConnectServer()
