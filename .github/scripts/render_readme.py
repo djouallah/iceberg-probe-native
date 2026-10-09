@@ -15,6 +15,7 @@ only if every one of them is yes, otherwise the worst outcome, with a note quoti
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -195,8 +196,18 @@ def cell(rows: dict, keys: list[str]) -> tuple[str, list[dict]]:
     return worst, [r for r in picked if r["outcome"] != "supported"]
 
 
+_MESSAGE = re.compile(r'"message"\s*:\s*"([^"]+)"')
+_STATUS = re.compile(r"\b([45]\d\d)\b")
+
+
 def _one_line(text: str, limit: int = 300) -> str:
+    """One line of what came back. A catalog error is quoted by its own status and message,
+    which a client wraps in a long prefix that would otherwise eat the whole limit."""
     flat = " ".join(str(text).split()).replace("|", "/")
+    message = _MESSAGE.search(flat)
+    if message:
+        status = _STATUS.search(flat)
+        flat = (f"{status.group(1)} " if status else "") + message.group(1)
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
