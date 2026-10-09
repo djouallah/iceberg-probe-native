@@ -48,7 +48,6 @@ operation · `—` not probed
 | Create branch | yes | na | na | na |
 | Create tag | yes | na | na | na |
 | Write to a branch | yes | na | na | na |
-| Roll back to a snapshot | yes | yes | na | na |
 
 ## Blocked by the OneLake catalog
 
