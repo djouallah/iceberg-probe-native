@@ -473,27 +473,129 @@ class DuckDBCapability:
         self.sql(f"UPDATE {self.t(table)} SET v = 999 WHERE id = 1")
         return self._expect(table, [(1, 999), (2, 20), (3, 30)], "UPDATE")
 
-    def merge_into(self) -> str:
-        table = self._fresh("merge")
+    def _merge(self, what: str, clauses: str, expected: list[tuple], label: str) -> str:
+        """One MERGE of (1, 777), (9, 90) into SEED, with the given WHEN clauses; the detail
+        says how many snapshots its one commit carried."""
+        table = self._fresh(what)
+        before = len(self._snapshots(table))
         self.sql(
             f"MERGE INTO {self.t(table)} AS tg "
             f"USING (SELECT * FROM (VALUES (1::BIGINT, 777::BIGINT), (9, 90)) AS s(id, v)) AS s "
-            f"ON tg.id = s.id "
-            f"WHEN MATCHED THEN UPDATE SET v = s.v "
-            f"WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)"
+            f"ON tg.id = s.id {clauses}"
         )
-        return self._expect(table, [(1, 777), (2, 20), (3, 30), (9, 90)], "MERGE INTO")
+        added = len(self._snapshots(table)) - before
+        return self._expect(table, expected, label) + f"; {added} snapshot(s) in the commit"
+
+    def merge_into(self) -> str:
+        return self._merge(
+            "merge",
+            "WHEN MATCHED THEN UPDATE SET v = s.v "
+            "WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)",
+            [(1, 777), (2, 20), (3, 30), (9, 90)],
+            "MERGE INTO",
+        )
 
     def merge_by_source(self) -> str:
-        table = self._fresh("mergesrc")
-        self.sql(
-            f"MERGE INTO {self.t(table)} AS tg "
-            f"USING (SELECT * FROM (VALUES (1::BIGINT, 777::BIGINT), (9, 90)) AS s(id, v)) AS s "
-            f"ON tg.id = s.id "
-            f"WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v) "
-            f"WHEN NOT MATCHED BY SOURCE THEN DELETE"
+        return self._merge(
+            "mergesrc",
+            "WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v) "
+            "WHEN NOT MATCHED BY SOURCE THEN DELETE",
+            [(1, 10), (9, 90)],
+            "MERGE ... WHEN NOT MATCHED BY SOURCE",
         )
-        return self._expect(table, [(1, 10), (9, 90)], "MERGE ... WHEN NOT MATCHED BY SOURCE")
+
+    def merge_update_only(self) -> str:
+        return self._merge(
+            "mergeupd",
+            "WHEN MATCHED THEN UPDATE SET v = s.v",
+            [(1, 777), (2, 20), (3, 30)],
+            "MERGE, UPDATE only",
+        )
+
+    def merge_delete_only(self) -> str:
+        return self._merge(
+            "mergedel", "WHEN MATCHED THEN DELETE", [(2, 20), (3, 30)], "MERGE, DELETE only"
+        )
+
+    def merge_insert_only(self) -> str:
+        return self._merge(
+            "mergeins",
+            "WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)",
+            SEED + [(9, 90)],
+            "MERGE, INSERT only",
+        )
+
+    def merge_by_source_only(self) -> str:
+        return self._merge(
+            "mergesrconly",
+            "WHEN NOT MATCHED BY SOURCE THEN DELETE",
+            [(1, 10)],
+            "MERGE, NOT MATCHED BY SOURCE DELETE only",
+        )
+
+    def merge_delete_insert(self) -> str:
+        return self._merge(
+            "mergedelins",
+            "WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)",
+            [(2, 20), (3, 30), (9, 90)],
+            "MERGE, DELETE + INSERT",
+        )
+
+    def merge_update_by_source(self) -> str:
+        return self._merge(
+            "mergeupdsrc",
+            "WHEN MATCHED THEN UPDATE SET v = s.v WHEN NOT MATCHED BY SOURCE THEN DELETE",
+            [(1, 777)],
+            "MERGE, UPDATE + NOT MATCHED BY SOURCE DELETE",
+        )
+
+    def merge_three(self) -> str:
+        return self._merge(
+            "mergethree",
+            "WHEN MATCHED THEN UPDATE SET v = s.v "
+            "WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v) "
+            "WHEN NOT MATCHED BY SOURCE THEN DELETE",
+            [(1, 777), (9, 90)],
+            "MERGE, UPDATE + INSERT + NOT MATCHED BY SOURCE DELETE",
+        )
+
+    def _transaction(self, what: str, statements: list[str], expected: list[tuple]) -> str:
+        """Several writes to one table in BEGIN ... COMMIT: one commit, one snapshot each."""
+        table = self._fresh(what)
+        before = len(self._snapshots(table))
+        self.sql("BEGIN TRANSACTION")
+        try:
+            for statement in statements:
+                self.sql(statement.format(t=self.t(table)))
+            self.sql("COMMIT")
+        except Refused:
+            with contextlib.suppress(Refused):
+                self.sql("ROLLBACK", echo=False)
+            raise
+        added = len(self._snapshots(table)) - before
+        label = " + ".join(st.split()[0] for st in statements) + " in one transaction"
+        return self._expect(table, expected, label) + f"; {added} snapshot(s) in the commit"
+
+    def txn_two_inserts(self) -> str:
+        return self._transaction(
+            "txins2",
+            ["INSERT INTO {t} VALUES (4, 40)", "INSERT INTO {t} VALUES (5, 50)"],
+            SEED + [(4, 40), (5, 50)],
+        )
+
+    def txn_update_insert(self) -> str:
+        return self._transaction(
+            "txupdins",
+            ["UPDATE {t} SET v = 999 WHERE id = 1", "INSERT INTO {t} VALUES (4, 40)"],
+            [(1, 999), (2, 20), (3, 30), (4, 40)],
+        )
+
+    def txn_two_updates(self) -> str:
+        return self._transaction(
+            "txupd2",
+            ["UPDATE {t} SET v = 999 WHERE id = 1", "UPDATE {t} SET v = 888 WHERE id = 2"],
+            [(1, 999), (2, 888), (3, 30)],
+        )
 
     def truncate(self) -> str:
         table = self._fresh("truncate")
@@ -797,6 +899,20 @@ PROBES = [
     ("write", "UPDATE", "update"),
     ("write", "MERGE INTO", "merge_into"),
     ("write", "MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE", "merge_by_source"),
+    ("write", "MERGE, one action: WHEN MATCHED UPDATE", "merge_update_only"),
+    ("write", "MERGE, one action: WHEN MATCHED DELETE", "merge_delete_only"),
+    ("write", "MERGE, one action: WHEN NOT MATCHED INSERT", "merge_insert_only"),
+    ("write", "MERGE, one action: WHEN NOT MATCHED BY SOURCE DELETE", "merge_by_source_only"),
+    ("write", "MERGE, two actions: MATCHED DELETE + NOT MATCHED INSERT", "merge_delete_insert"),
+    (
+        "write",
+        "MERGE, two actions: MATCHED UPDATE + NOT MATCHED BY SOURCE DELETE",
+        "merge_update_by_source",
+    ),
+    ("write", "MERGE, three actions: UPDATE + INSERT + BY SOURCE DELETE", "merge_three"),
+    ("write", "transaction: INSERT + INSERT", "txn_two_inserts"),
+    ("write", "transaction: UPDATE + INSERT", "txn_update_insert"),
+    ("write", "transaction: UPDATE + UPDATE", "txn_two_updates"),
     ("write", "TRUNCATE", "truncate"),
     ("schema", "ALTER TABLE ADD COLUMN", "add_column"),
     ("schema", "ALTER TABLE DROP COLUMN", "drop_column"),
