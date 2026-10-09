@@ -320,6 +320,15 @@ class SailCapability:
             raise NoOp("WRITE ORDERED BY returned success and the table has no sort order")
         return "sort order set"
 
+    def format_v3(self) -> str:
+        if not self.can_create:
+            raise Skip("no table could be created")
+        table = self._create("v3", tail="TBLPROPERTIES ('format-version' = '3')")
+        version = self.iceberg(table).metadata.format_version
+        if version != 3:
+            raise NoOp(f"asked for format-version 3, the table came back at {version}")
+        return "format-version 3"
+
     # -- write -------------------------------------------------------------------------------
 
     def insert_into(self) -> str:
@@ -622,6 +631,7 @@ PROBES = [
     ("create", "CREATE OR REPLACE TABLE ... AS SELECT, existing table", "create_or_replace"),
     ("create", "PARTITIONED BY (p), then INSERT", "partitioned"),
     ("create", "ALTER TABLE ... WRITE ORDERED BY (sort order)", "sort_order"),
+    ("create", "format-version 3", "format_v3"),
     ("create", "PARTITIONED BY (bucket(4, id)), then INSERT", "partition_bucket"),
     ("create", "PARTITIONED BY (truncate(2, x)), then INSERT", "partition_truncate"),
     ("create", "PARTITIONED BY years / months / days / hours, then INSERT", "partition_temporal"),

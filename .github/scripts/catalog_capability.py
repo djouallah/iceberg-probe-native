@@ -723,6 +723,19 @@ class Capability:
             )
         return "honoured: the table is not in the catalog until the first commit"
 
+    def create_v3(self) -> str:
+        """Read the format version back, because the create succeeds either way.
+
+        A table that comes back at v2 after a request for v3 is neither support nor a decline,
+        and the response alone does not separate them -- only checking the result does. A
+        catalog that cannot make v3 tables should refuse the request.
+        """
+        table = self.create("v3", properties={"format-version": "3"})
+        version = table.metadata.format_version
+        if version != 3:
+            raise NoOp(f"asked for format-version 3, the table came back at {version}")
+        return "format-version 3 tables are created"
+
     def create_partitioned(self) -> str:
         from pyiceberg.partitioning import PartitionField, PartitionSpec
         from pyiceberg.transforms import IdentityTransform
@@ -1163,6 +1176,7 @@ PROBES = [
     ("create", "createTable with a field id of 0 (Spark numbering)", "create_field_id_zero"),
     ("create", "createTable with no location", "create_without_location"),
     ("create", "createTable with stage-create, is it honoured", "create_staged"),
+    ("create", "createTable at format-version 3", "create_v3"),
     ("create", "createTable partitioned, then write it", "create_partitioned"),
     ("create", "createTable with a sort order", "create_sorted"),
     ("create", "partitioned by bucket(4, id), then append", "partition_bucket"),

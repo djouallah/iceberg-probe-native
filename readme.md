@@ -56,6 +56,7 @@ The catalog itself refuses or ignores these, so no engine can do them.
 
 | Operation | Catalog |
 |---|---|
+| format-version 3 | no-op: the table is created at v2 |
 | Staged create (`stage-create: true`) | no: `400 Malformed request` |
 | More than one snapshot in one commit (MERGE with two actions, overwrite, a transaction with more than one write) | no: `400 Only one instance of each update type is allowed per request. Duplicate types: add-snapshot` |
 | Roll back to a snapshot | no-op: `refs.main` moves, `current-snapshot-id` does not |
