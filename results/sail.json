@@ -143,6 +143,34 @@
    "detail": "MERGE ... WHEN NOT MATCHED BY SOURCE: pyiceberg reads [(1, 10), (9, 90)]; Sail agrees"
   },
   {
+   "key": "merge_update_only",
+   "group": "write",
+   "question": "MERGE, UPDATE only",
+   "outcome": "supported",
+   "detail": "MERGE, UPDATE only: pyiceberg reads [(1, 777), (2, 20), (3, 30)]; Sail agrees"
+  },
+  {
+   "key": "merge_delete_only",
+   "group": "write",
+   "question": "MERGE, DELETE only",
+   "outcome": "supported",
+   "detail": "MERGE, DELETE only: pyiceberg reads [(2, 20), (3, 30)]; Sail agrees"
+  },
+  {
+   "key": "merge_insert_only",
+   "group": "write",
+   "question": "MERGE, INSERT only",
+   "outcome": "supported",
+   "detail": "MERGE, INSERT only: pyiceberg reads [(1, 10), (2, 20), (3, 30), (9, 90)]; Sail agrees"
+  },
+  {
+   "key": "merge_by_source_only",
+   "group": "write",
+   "question": "MERGE, NOT MATCHED BY SOURCE DELETE only",
+   "outcome": "supported",
+   "detail": "MERGE, NOT MATCHED BY SOURCE DELETE only: pyiceberg reads [(1, 10)]; Sail agrees"
+  },
+  {
    "key": "merge_mor",
    "group": "write",
    "question": "MERGE INTO, merge-on-read table",
@@ -189,7 +217,7 @@
    "group": "schema",
    "question": "ALTER COLUMN c TYPE BIGINT (int -> long)",
    "outcome": "no",
-   "detail": "AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_promote"
+   "detail": "AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_38012150653_1_promote"
   },
   {
    "key": "partition_evolution",
@@ -203,7 +231,7 @@
    "group": "schema",
    "question": "ALTER TABLE SET TBLPROPERTIES",
    "outcome": "no",
-   "detail": "AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_props"
+   "detail": "AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_38012150653_1_props"
   },
   {
    "key": "time_travel",
@@ -217,7 +245,7 @@
    "group": "read",
    "question": "metadata tables (t.snapshots)",
    "outcome": "no",
-   "detail": "IllegalArgumentException: invalid argument: table reference: [Identifier(\"onelake\"), Identifier(\"_bench_capability\"), Identifier(\"sl_37952652391_1_inspect\"), Identifier(\"snapshots\")]"
+   "detail": "IllegalArgumentException: invalid argument: table reference: [Identifier(\"onelake\"), Identifier(\"_bench_capability\"), Identifier(\"sl_38012150653_1_inspect\"), Identifier(\"snapshots\")]"
   },
   {
    "key": "create_branch",
@@ -273,7 +301,7 @@
    "group": "catalog",
    "question": "CREATE DATABASE, then DROP DATABASE",
    "outcome": "supported",
-   "detail": "`sl_37952652391_1_ns` created, listed, dropped"
+   "detail": "`sl_38012150653_1_ns` created, listed, dropped"
   },
   {
    "key": "rename_table",
@@ -297,27 +325,20 @@
    "detail": "retried: final [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]; commits [409, 200]"
   },
   {
-   "key": "race_read_write",
-   "group": "concurrency",
-   "question": "INSERT INTO t SELECT max(id) + 1, sum(v); B appends",
-   "outcome": "no",
-   "detail": "skew: final [(1, 10), (2, 20), (3, 30), (4, 40), (4, 60)]; commits [409, 200]"
-  },
-  {
    "key": "race_delete",
    "group": "concurrency",
    "question": "DELETE id 1; B appends",
    "outcome": "supported",
-   "detail": "refused: final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised Refused: Refused: AnalysisException: Iceberg commit failed: reference 'main' expected snapshot Some(6387223786479690100) but found Some(2621847058752989010)"
+   "detail": "refused: final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised Refused: Refused: AnalysisException: Iceberg commit failed: reference 'main' expected snapshot Some(1335633744497614839) but found Some(7983725396265119715)"
   },
   {
    "key": "race_update",
    "group": "concurrency",
    "question": "UPDATE v = v + 1 on id 2; B appends",
    "outcome": "supported",
-   "detail": "refused: final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised Refused: Refused: AnalysisException: Iceberg commit failed: reference 'main' expected snapshot Some(2308409602103649055) but found Some(7903796847600174512)"
+   "detail": "refused: final [(1, 10), (2, 20), (3, 30), (4, 40)]; commits [409]; raised Refused: Refused: AnalysisException: Iceberg commit failed: reference 'main' expected snapshot Some(2558930533836869161) but found Some(3155249651422313036)"
   }
  ],
- "run": "37952652391",
- "date": "2026-10-09"
+ "run": "38012150653",
+ "date": "2026-10-10"
 }

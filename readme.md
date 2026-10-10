@@ -15,7 +15,7 @@ Polars, DuckDB, Sail and chDB: engines with their own Iceberg implementation, no
 | DELETE | na | yes | yes | yes |
 | UPDATE | na | yes | yes | yes |
 | MERGE INTO / upsert | na | no ² | yes | no ³ |
-| MERGE with one action | na | yes | — | no ⁴ |
+| MERGE with one action | na | yes | yes | no ⁴ |
 | MERGE ... WHEN NOT MATCHED BY SOURCE | na | no ⁵ | yes | no ⁶ |
 | INSERT OVERWRITE, whole table | no ⁷ | no ⁸ | yes | no ⁹ |
 | INSERT OVERWRITE, one partition / by filter | na | no ¹⁰ | no ¹¹ | no ¹² |
@@ -102,14 +102,14 @@ The catalog itself refuses or ignores these, so no engine can do them.
 24. Sail, Add column: ALTER TABLE ADD COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
 25. Sail, Drop column: ALTER TABLE DROP COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
 26. Sail, Rename column: ALTER TABLE RENAME COLUMN: `UnsupportedOperationException: unsupported ALTER TABLE operation`
-27. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_promote`
+27. Sail, Type promotion (int → long): ALTER COLUMN c TYPE BIGINT (int -> long): `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_38012150653_1_promote`
 28. Sail, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `IllegalArgumentException: invalid argument: found FIELD at 81:86 expected '('`
 29. chDB, Partition evolution: ALTER TABLE ADD PARTITION FIELD (partition evolution): `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 70 (PARTITION): PARTITION FIELD bucket(4, id). Expected one of: COLUMN, INDEX, STATISTICS, PROJECTION, CONSTRAINT, end of query. (SYNTAX_ERROR)`
-30. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_37952652391_1_props`
+30. Sail, Set table property: ALTER TABLE SET TBLPROPERTIES: `AnalysisException: external error: This feature is not implemented: ALTER TABLE is not yet supported for catalog-managed Iceberg tables: onelake._bench_capability.sl_38012150653_1_props`
 31. chDB, Set table property: ALTER TABLE SET TBLPROPERTIES: `ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 64 (SET): SET TBLPROPERTIES ('probed-at' = '37949375865_1'). Expected one of: ON, a list of ALTER commands, ALTER command, ADD COLUMN, RENAME COLUMN, MATERIALIZE COLUMN, DROP PARTITION, DROP PART, FORGET PARTITION, DROP DETACHED P…`
 32. Sail, Sort order evolution: ALTER TABLE ... WRITE ORDERED BY (sort order): `IllegalArgumentException: invalid argument: found WRITE at 66:71 expected '.', 'RENAME', 'PARTITION', 'ADD', 'DROP', 'ALTER', 'CHANGE', 'REPLACE', 'SET', 'UNSET', or 'RECOVER'`
 33. chDB, Sort order evolution: ALTER TABLE MODIFY ORDER BY (sort order evolution): `ChdbError: Code: 48. DB::Exception: Alter of type 'MODIFY_ORDER_BY' is not supported by Iceberg storage. (NOT_IMPLEMENTED)`
-34. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_37952652391_1_inspect"), Identifier("snapshots")]`
+34. Sail, Metadata tables: metadata tables (t.snapshots): `IllegalArgumentException: invalid argument: table reference: [Identifier("onelake"), Identifier("_bench_capability"), Identifier("sl_38012150653_1_inspect"), Identifier("snapshots")]`
 35. chDB, Metadata tables: metadata (system.iceberg_history): `400 Malformed request`
 36. Sail, Compaction: CALL system.rewrite_data_files (compaction): `IllegalArgumentException: invalid argument: found CALL at 0:4 expected something else, ';', statement, or end of input`
 37. chDB, Compaction: OPTIMIZE TABLE (compaction): `returned success and data files went 2 -> 2`
@@ -190,6 +190,6 @@ The OneLake Iceberg REST catalog in production, read by CI (`.github/workflows/c
 
 - polars: 2.0.0, run 37949375865, 2026-10-09
 - duckdb: v2.0.0-alpha46057, run 38011645322, 2026-10-10
-- sail: 0.7.2, run 37952652391, 2026-10-09
+- sail: 0.7.2, run 38012150653, 2026-10-10
 - chdb: 4.4.0, run 37949375865, 2026-10-09
 - duckdb_isolation: v2.0.0-alpha46057, run 37953552712, 2026-10-09
