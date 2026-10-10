@@ -113,4 +113,5 @@ def test_site_matrix_uses_the_site_engine_keys():
     assert set(site["engines"]) == {"polars_iceberg", "duckdb_iceberg"}
     update = next(r for r in site["rows"] if r["label"] == "UPDATE")
     assert update["cells"] == {"polars_iceberg": {"o": "na"}, "duckdb_iceberg": {"o": "skipped"}}
-    assert all(r["label"] not in site["blocked"] for r in site["rows"])
+    assert "blocked" not in site
+    assert not {r["label"] for r in site["rows"]} & set(render_readme.BLOCKED_BY_CATALOG)

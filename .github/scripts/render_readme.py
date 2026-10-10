@@ -456,7 +456,6 @@ def site_matrix(data: dict) -> dict:
         },
         "groups": list(GROUPS),
         "rows": rows,
-        "blocked": BLOCKED_BY_CATALOG,
     }
 
 
