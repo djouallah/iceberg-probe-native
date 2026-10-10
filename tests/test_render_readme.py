@@ -100,3 +100,17 @@ def test_duckdb_isolation_rows_fill_the_duckdb_column():
         ln.startswith("| Concurrent writer: DELETE loses nothing") and "| na | no " in ln
         for ln in lines
     )
+
+
+def test_every_row_is_in_exactly_one_site_group_or_blocked():
+    placed = [label for labels in render_readme.GROUPS.values() for label in labels]
+    placed += render_readme.BLOCKED_BY_CATALOG
+    assert sorted(placed) == sorted(label for label, _ in render_readme.ROWS)
+
+
+def test_site_matrix_uses_the_site_engine_keys():
+    site = render_readme.site_matrix(DATA)
+    assert set(site["engines"]) == {"polars_iceberg", "duckdb_iceberg"}
+    update = next(r for r in site["rows"] if r["label"] == "UPDATE")
+    assert update["cells"] == {"polars_iceberg": {"o": "na"}, "duckdb_iceberg": {"o": "skipped"}}
+    assert all(r["label"] not in site["blocked"] for r in site["rows"])

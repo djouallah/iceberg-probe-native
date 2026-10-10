@@ -154,7 +154,7 @@ jobs:
           python3 .github/scripts/render_readme.py results readme.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add readme.md results
+          git add readme.md results docs
           if git diff --cached --quiet; then echo "readme unchanged"; exit 0; fi
           git commit -m "readme: readings from run ${{ github.run_id }}"
           git pull --rebase origin main

@@ -170,6 +170,75 @@ for _label, _sources in ROWS:
     if _label in CHDB:
         _sources["chdb"] = CHDB[_label]
 
+# THE SITE'S GRID (docs/capability.json, which lakehouse_benchmark publishes as its Capability
+# tab): every row of ROWS in one group, except the rows the OneLake catalog itself blocks, which
+# say nothing about the engines and are listed apart until the catalog takes them.
+GROUPS = {
+    "Write": [
+        "INSERT / append",
+        "INSERT ... SELECT",
+        "DELETE",
+        "UPDATE",
+        "MERGE with one action",
+        "TRUNCATE",
+    ],
+    "Tables & types": [
+        "CREATE TABLE",
+        "CREATE TABLE AS SELECT",
+        "Partitioned table",
+        "Partition transform: bucket",
+        "Partition transform: truncate",
+        "Partition transforms: year / month / day / hour",
+        "Types: decimal, date, timestamp, timestamptz, uuid, binary",
+        "Nested types: struct, list, map",
+        "Drop table with purge",
+        "Create / drop namespace",
+    ],
+    "Schema": [
+        "Add column",
+        "Drop column",
+        "Rename column",
+        "Type promotion (int → long)",
+        "Partition evolution",
+        "Write after partition evolution",
+        "Set table property",
+        "Sort order at create",
+        "Sort order evolution",
+    ],
+    "Concurrency": [
+        "A commit against a stale snapshot is refused",
+        "Concurrent append: both kept",
+        "Concurrent writer: DELETE loses nothing",
+        "Concurrent writer: UPDATE loses nothing",
+    ],
+    "Read & maintenance": [
+        "Time travel",
+        "Metadata tables",
+        "Compaction",
+        "Expire snapshots",
+        "Create branch",
+        "Create tag",
+        "Credential vending",
+    ],
+}
+BLOCKED_BY_CATALOG = [
+    "MERGE INTO / upsert",
+    "MERGE ... WHEN NOT MATCHED BY SOURCE",
+    "INSERT OVERWRITE, whole table",
+    "INSERT OVERWRITE, one partition / by filter",
+    "Several writes in one transaction",
+    "CREATE OR REPLACE TABLE",
+    "format-version 3",
+]
+# The site's engine keys, which are lakehouse_benchmark's.
+SITE_KEY = {
+    "polars": "polars_iceberg",
+    "duckdb": "duckdb_iceberg",
+    "sail": "lakesail_iceberg",
+    "chdb": "chdb_iceberg",
+}
+RUN_URL = "https://github.com/djouallah/iceberg-probe-native/actions/runs/{}"
+
 # Worst first: the cell shows the worst outcome among the row's probes.
 SEVERITY = ["broken", "no", "no-op", "skipped", "supported"]
 MARK = {"supported": "yes", "no": "no", "no-op": "no-op", "skipped": "—", "broken": "?"}
@@ -208,12 +277,19 @@ def _one_line(text: str, limit: int = 300) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
-def capability(data: dict) -> tuple[list[str], list[str]]:
+def by_engine(data: dict) -> tuple[list[str], dict]:
+    """The engines with a reading, and each one's rows by probe key. DuckDB's column also carries
+    its isolation run's rows."""
     engines = [e for e in ENGINES if e in data]
     by_key = {e: {r["key"]: r for r in data[e]["rows"]} for e in engines}
     if "duckdb" in by_key:
         isolation_rows = data.get("duckdb_isolation", {}).get("rows", [])
         by_key["duckdb"].update({r["key"]: r for r in isolation_rows})
+    return engines, by_key
+
+
+def capability(data: dict) -> tuple[list[str], list[str]]:
+    engines, by_key = by_engine(data)
     head = ["| Operation | " + " | ".join(TITLE[e] for e in engines) + " |"]
     head.append("|---|" + "---|" * len(engines))
     head.append("| Version | " + " | ".join(data[e]["version"] for e in engines) + " |")
@@ -351,12 +427,52 @@ def render(data: dict, readme: str) -> str:
     return "\n".join(out)
 
 
+def site_matrix(data: dict) -> dict:
+    """The capability grid for lakehouse_benchmark's site: the readme's cells, grouped, with the
+    rows the catalog blocks kept apart. Each cell is {"o": outcome, "n": what came back}."""
+    engines, by_key = by_engine(data)
+    sources = dict(ROWS)
+    rows = []
+    for group, labels in GROUPS.items():
+        for label in labels:
+            cells = {}
+            for e in engines:
+                if e not in sources[label]:
+                    cells[SITE_KEY[e]] = {"o": "na"}
+                    continue
+                outcome, why = cell(by_key[e], sources[label][e])
+                note = "; ".join(_one_line(r["detail"], 220) for r in why)
+                cells[SITE_KEY[e]] = {"o": outcome, **({"n": note} if note else {})}
+            rows.append({"group": group, "label": label, "cells": cells})
+    return {
+        "engines": {
+            SITE_KEY[e]: {
+                "version": data[e]["version"],
+                "run": data[e]["run"],
+                "url": RUN_URL.format(data[e]["run"]),
+                "date": data[e]["date"],
+            }
+            for e in engines
+        },
+        "groups": list(GROUPS),
+        "rows": rows,
+        "blocked": BLOCKED_BY_CATALOG,
+    }
+
+
 def main() -> int:
     results = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
     path = Path(sys.argv[2] if len(sys.argv) > 2 else "readme.md")
-    text = render(load(results), path.read_text(encoding="utf-8"))
-    path.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote {path} from {', '.join(sorted(load(results)))}")
+    site = Path(sys.argv[3] if len(sys.argv) > 3 else "docs/capability.json")
+    data = load(results)
+    path.write_text(render(data, path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+    site.parent.mkdir(parents=True, exist_ok=True)
+    site.write_text(
+        json.dumps(site_matrix(data), ensure_ascii=False, indent=1) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    print(f"wrote {path} and {site} from {', '.join(sorted(data))}")
     return 0
 
 
