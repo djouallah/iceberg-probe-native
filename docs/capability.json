@@ -8,9 +8,9 @@
   },
   "duckdb_iceberg": {
    "version": "v2.0.0-alpha46057",
-   "run": "37949375865",
-   "url": "https://github.com/djouallah/iceberg-probe-native/actions/runs/37949375865",
-   "date": "2026-10-09"
+   "run": "38011645322",
+   "url": "https://github.com/djouallah/iceberg-probe-native/actions/runs/38011645322",
+   "date": "2026-10-10"
   },
   "lakesail_iceberg": {
    "version": "0.7.2",
@@ -116,10 +116,11 @@
      "o": "supported"
     },
     "lakesail_iceberg": {
-     "o": "na"
+     "o": "skipped"
     },
     "chdb_iceberg": {
-     "o": "na"
+     "o": "no",
+     "n": "ChdbError: Code: 62. DB::Exception: Syntax error: failed at position 12 (onelake): onelake.`_bench_capability.ch_37949375865_1_merge` t USING (SELECT * FROM values('id Int64, v Int64', (1, 777), (9, 90))) s ON t.id = s.…"
     }
    }
   },
@@ -661,7 +662,7 @@
     },
     "duckdb_iceberg": {
      "o": "no",
-     "n": "Parser Error: syntax error at or near \"CREATE\" LINE 1: ... TABLE onelake.\"_bench_capability\".\"dk_37949375865_1_branch\" CREATE BRANCH probe_branch ^^^^^^"
+     "n": "Parser Error: syntax error at or near \"CREATE\" LINE 1: ... TABLE onelake.\"_bench_capability\".\"dk_38011645322_1_branch\" CREATE BRANCH probe_branch ^^^^^^"
     },
     "lakesail_iceberg": {
      "o": "no",
