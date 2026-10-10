@@ -598,7 +598,22 @@ class DuckDBCapability:
     def truncate(self) -> str:
         table = self._fresh("truncate")
         self.sql(f"TRUNCATE {self.t(table)}")
-        return self._expect(table, [], "TRUNCATE")
+        result = self._expect(table, [], "TRUNCATE")
+        # Metadata-only means the snapshot drops the data files and writes nothing new; the other
+        # way is a delete file per data file, which every reader then has to apply.
+        summary = self.iceberg(table).current_snapshot().summary
+        counts = {
+            k: summary.get(k, "0")
+            for k in ("deleted-data-files", "added-data-files", "added-delete-files")
+        }
+        kind = (
+            "metadata-only"
+            if counts["added-data-files"] == "0" and counts["added-delete-files"] == "0"
+            else "NOT metadata-only"
+        )
+        return f"{result}; {kind}: {summary.operation.value} snapshot, " + ", ".join(
+            f"{k} {v}" for k, v in counts.items()
+        )
 
     # -- probes: schema ----------------------------------------------------------------------
 
