@@ -418,6 +418,44 @@ class SailCapability:
         )
         return self._expect(table, [(1, 10), (9, 90)], "MERGE ... WHEN NOT MATCHED BY SOURCE")
 
+    def _merge(self, what: str, action: str, expected: list, label: str) -> str:
+        """One MERGE with a single action, source (1, 777), (9, 90): DuckDB's same four."""
+        table = self._fresh(what)
+        self.sql(
+            f"MERGE INTO {self.t(table)} t USING ({_select([(1, 777), (9, 90)])}) s "
+            f"ON t.id = s.id {action}"
+        )
+        return self._expect(table, expected, label)
+
+    def merge_update_only(self) -> str:
+        return self._merge(
+            "mergeupd",
+            "WHEN MATCHED THEN UPDATE SET t.v = s.v",
+            [(1, 777), (2, 20), (3, 30)],
+            "MERGE, UPDATE only",
+        )
+
+    def merge_delete_only(self) -> str:
+        return self._merge(
+            "mergedel", "WHEN MATCHED THEN DELETE", [(2, 20), (3, 30)], "MERGE, DELETE only"
+        )
+
+    def merge_insert_only(self) -> str:
+        return self._merge(
+            "mergeins",
+            "WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)",
+            SEED + [(9, 90)],
+            "MERGE, INSERT only",
+        )
+
+    def merge_by_source_only(self) -> str:
+        return self._merge(
+            "mergesrconly",
+            "WHEN NOT MATCHED BY SOURCE THEN DELETE",
+            [(1, 10)],
+            "MERGE, NOT MATCHED BY SOURCE DELETE only",
+        )
+
     def truncate(self) -> str:
         table = self._fresh("truncate")
         self.sql(f"TRUNCATE TABLE {self.t(table)}")
@@ -675,6 +713,10 @@ PROBES = [
     ("write", "UPDATE", "update"),
     ("write", "MERGE INTO", "merge_into"),
     ("write", "MERGE ... WHEN NOT MATCHED BY SOURCE THEN DELETE", "merge_by_source"),
+    ("write", "MERGE, UPDATE only", "merge_update_only"),
+    ("write", "MERGE, DELETE only", "merge_delete_only"),
+    ("write", "MERGE, INSERT only", "merge_insert_only"),
+    ("write", "MERGE, NOT MATCHED BY SOURCE DELETE only", "merge_by_source_only"),
     ("write", "MERGE INTO, merge-on-read table", "merge_mor"),
     ("write", "MERGE ... WHEN MATCHED THEN DELETE, merge-on-read table", "merge_delete_mor"),
     ("write", "TRUNCATE TABLE", "truncate"),

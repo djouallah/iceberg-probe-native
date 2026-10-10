@@ -48,12 +48,8 @@ ROWS = [
     (
         "MERGE with one action",
         {
-            "duckdb": [
-                "merge_update_only",
-                "merge_delete_only",
-                "merge_insert_only",
-                "merge_by_source_only",
-            ]
+            e: [f"merge_{a}_only" for a in ("update", "delete", "insert", "by_source")]
+            for e in ("duckdb", "sail")
         },
     ),
     (
@@ -153,6 +149,8 @@ CHDB = {
     "DELETE": ["delete_from", "alter_delete"],
     "UPDATE": ["alter_update"],
     "MERGE INTO / upsert": ["merge_into"],
+    # chDB has no MERGE statement at all, so its one-action cell is the same answer.
+    "MERGE with one action": ["merge_into"],
     "MERGE ... WHEN NOT MATCHED BY SOURCE": ["merge_by_source"],
     "INSERT OVERWRITE, whole table": ["insert_overwrite"],
     "INSERT OVERWRITE, one partition / by filter": ["overwrite_partition"],
